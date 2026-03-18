@@ -26,6 +26,26 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
+      - name: Validate BigQuery tables
+        run: |
+          PROJECT=future-gadget-labs-483502
+          TABLES=(
+            "inventory.products"
+            "inventory.transactions"
+            "inventory.collection"
+            "market_data.price_history"
+          )
+          FAILED=0
+          for TABLE in "${TABLES[@]}"; do
+            if bq show --project_id=$PROJECT "$TABLE" > /dev/null 2>&1; then
+              echo "✓ $TABLE"
+            else
+              echo "✗ $TABLE NOT FOUND"
+              FAILED=1
+            fi
+          done
+          [ $FAILED -eq 0 ] || exit 1
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Configure Docker for Artifact Registry
