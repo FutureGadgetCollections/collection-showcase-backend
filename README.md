@@ -444,3 +444,4 @@ go run .
 - [ ] Monthly BQ → JSON export (Cloud Scheduler + Cloud Run job)
 - [ ] Hugo frontend with Firebase Sign-In
 - [ ] Price history ingestion job (TCGPlayer / PriceCharting scraper)
+
