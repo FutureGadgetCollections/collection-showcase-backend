@@ -4,9 +4,12 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/bigquery"
+	firebase "firebase.google.com/go/v4"
 	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/handlers"
+	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +25,7 @@ func main() {
 	inventoryDataset := getEnv("BQ_INVENTORY_DATASET", "inventory")
 	marketDataset := getEnv("BQ_MARKET_DATASET", "market_data")
 	port := getEnv("PORT", "8080")
+	allowedEmails := strings.Split(getEnv("ALLOWED_EMAILS", ""), ",")
 
 	ctx := context.Background()
 	bqClient, err := bigquery.NewClient(ctx, project)
@@ -29,6 +33,15 @@ func main() {
 		log.Fatalf("failed to create bigquery client: %v", err)
 	}
 	defer bqClient.Close()
+
+	fbApp, err := firebase.NewApp(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to init firebase app: %v", err)
+	}
+	authClient, err := fbApp.Auth(ctx)
+	if err != nil {
+		log.Fatalf("failed to init firebase auth: %v", err)
+	}
 
 	router := gin.Default()
 
@@ -47,19 +60,21 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	requireAuth := middleware.RequireAuth(authClient, allowedEmails)
+
 	ph := handlers.NewProductHandler(bqClient, inventoryDataset)
 	router.GET("/products", ph.List)
 	router.GET("/products/:id", ph.Get)
-	router.POST("/products", ph.Create)
-	router.PUT("/products/:id", ph.Update)
-	router.DELETE("/products/:id", ph.Delete)
+	router.POST("/products", requireAuth, ph.Create)
+	router.PUT("/products/:id", requireAuth, ph.Update)
+	router.DELETE("/products/:id", requireAuth, ph.Delete)
 
 	th := handlers.NewTransactionHandler(bqClient, inventoryDataset)
 	router.GET("/transactions", th.List)
 	router.GET("/transactions/:id", th.Get)
-	router.POST("/transactions", th.Create)
-	router.PUT("/transactions/:id", th.Update)
-	router.DELETE("/transactions/:id", th.Delete)
+	router.POST("/transactions", requireAuth, th.Create)
+	router.PUT("/transactions/:id", requireAuth, th.Update)
+	router.DELETE("/transactions/:id", requireAuth, th.Delete)
 
 	ch := handlers.NewCollectionHandler(bqClient, inventoryDataset)
 	router.GET("/collection", ch.List)
@@ -67,8 +82,8 @@ func main() {
 
 	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset)
 	router.GET("/price-history", prh.List)
-	router.POST("/price-history", prh.Create)
-	router.DELETE("/price-history/:record_id", prh.Delete)
+	router.POST("/price-history", requireAuth, prh.Create)
+	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
 
 	log.Printf("starting server on :%s", port)
 	if err := router.Run(":" + port); err != nil {

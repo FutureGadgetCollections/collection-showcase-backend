@@ -126,15 +126,19 @@ func main() {
 	viewSQL := fmt.Sprintf(`CREATE OR REPLACE VIEW `+"`%s.inventory.collection`"+` AS
 SELECT
     product_id,
-    SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END) AS quantity,
-    SAFE_DIVIDE(
-        SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END),
-        NULLIF(SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END), 0)
-    ) AS avg_unit_cost,
-    SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END) AS total_invested
-FROM `+"`%s.inventory.transactions`"+`
-GROUP BY product_id
-HAVING SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END) > 0`, project, project)
+    quantity,
+    SAFE_DIVIDE(total_buy_value, total_buy_qty) AS avg_unit_cost,
+    total_buy_value AS total_invested
+FROM (
+    SELECT
+        product_id,
+        SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END) AS quantity,
+        SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END) AS total_buy_value,
+        SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END) AS total_buy_qty
+    FROM `+"`%s.inventory.transactions`"+`
+    GROUP BY product_id
+)
+WHERE quantity > 0`, project, project)
 
 	q := client.Query(viewSQL)
 	job, err := q.Run(ctx)
