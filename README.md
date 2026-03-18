@@ -2,14 +2,16 @@
 
 Go/Cloud Run backend for tracking a TCG card collection — purchases, sales, inventory, and market price history. Part of the Future Gadget Labs collection showcase system.
 
+**Frontend:** https://github.com/FutureGadgetCollections/collection-showcase-frontend
+
 ---
 
 ## System Architecture
 
 ```mermaid
 graph TB
-    subgraph "Frontend (Planned)"
-        FE["Hugo Static Site\nGitHub Pages"]
+    subgraph "Frontend"
+        FE["Hugo Static Site\nGitHub Pages\ncollection-showcase-frontend"]
         FB["Firebase Auth\n(Google Sign-In)"]
     end
 
@@ -442,6 +444,7 @@ go run .
 - [ ] Firebase JWT middleware (verify token on all write routes)
 - [ ] Email allowlist (env var `ALLOWED_EMAILS`) for authorized writers
 - [ ] Monthly BQ → JSON export (Cloud Scheduler + Cloud Run job)
-- [ ] Hugo frontend with Firebase Sign-In
 - [ ] Price history ingestion job (TCGPlayer / PriceCharting scraper)
+
+> **Auth status:** All routes are currently unprotected. POST/PUT/DELETE routes must have Firebase JWT middleware in place before the frontend goes live.
 
