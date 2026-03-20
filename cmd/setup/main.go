@@ -65,12 +65,21 @@ func main() {
 		{Name: "tcgplayer_id", Type: bigquery.StringFieldType},
 		{Name: "pricecharting_url", Type: bigquery.StringFieldType},
 		{Name: "listing_url", Type: bigquery.StringFieldType},
+		{Name: "image_url", Type: bigquery.StringFieldType},
 		{Name: "created_at", Type: bigquery.TimestampFieldType},
 	}
 	productsTable := inventoryDataset.Table("products")
 	if err := productsTable.Create(ctx, &bigquery.TableMetadata{Schema: productsSchema}); err != nil {
 		if isAlreadyExists(err) {
-			fmt.Println("table inventory.products already exists")
+			fmt.Println("table inventory.products already exists, updating schema")
+			meta, err := productsTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get products table metadata: %v", err)
+			}
+			if _, err := productsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: productsSchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update products table schema: %v", err)
+			}
+			fmt.Println("updated schema: inventory.products")
 		} else {
 			log.Fatalf("failed to create products table: %v", err)
 		}

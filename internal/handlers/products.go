@@ -29,6 +29,7 @@ type Product struct {
 	TcgplayerID      string    `json:"tcgplayer_id" bigquery:"tcgplayer_id"`
 	PricechartingURL string    `json:"pricecharting_url" bigquery:"pricecharting_url"`
 	ListingURL       string    `json:"listing_url" bigquery:"listing_url"`
+	ImageURL         string    `json:"image_url" bigquery:"image_url"`
 	CreatedAt        time.Time `json:"created_at" bigquery:"created_at"`
 }
 
@@ -40,6 +41,7 @@ type CreateProductRequest struct {
 	TcgplayerID      string `json:"tcgplayer_id"`
 	PricechartingURL string `json:"pricecharting_url"`
 	ListingURL       string `json:"listing_url"`
+	ImageURL         string `json:"image_url"`
 }
 
 type UpdateProductRequest struct {
@@ -50,6 +52,7 @@ type UpdateProductRequest struct {
 	TcgplayerID      string `json:"tcgplayer_id,omitempty"`
 	PricechartingURL string `json:"pricecharting_url,omitempty"`
 	ListingURL       string `json:"listing_url,omitempty"`
+	ImageURL         string `json:"image_url,omitempty"`
 }
 
 func (h *ProductHandler) List(c *gin.Context) {
@@ -119,12 +122,38 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Prevent duplicate products by tcgplayer_id
+	if req.TcgplayerID != "" {
+		checkSQL := fmt.Sprintf("SELECT product_id FROM `%s.%s.products` WHERE tcgplayer_id = @tcgplayer_id LIMIT 1",
+			h.client.Project(), h.dataset)
+		checkQ := h.client.Query(checkSQL)
+		checkQ.Parameters = []bigquery.QueryParameter{
+			{Name: "tcgplayer_id", Value: req.TcgplayerID},
+		}
+		it, err := checkQ.Read(c.Request.Context())
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		var existing Product
+		if err := it.Next(&existing); err == nil {
+			c.JSON(409, gin.H{"error": "product with this tcgplayer_id already exists", "product_id": existing.ProductID})
+			return
+		}
+	}
+
+	// Auto-populate image_url from tcgplayer_id if not provided
+	imageURL := req.ImageURL
+	if imageURL == "" && req.TcgplayerID != "" {
+		imageURL = fmt.Sprintf("https://tcgplayer-cdn.tcgplayer.com/product/%s_in_1000x1000.jpg", req.TcgplayerID)
+	}
+
 	id := uuid.New().String()
 	createdAt := time.Now().UTC()
 
 	sql := fmt.Sprintf(`INSERT INTO `+"`%s.%s.products`"+`
-		(product_id, name, game_category, game_subcategory, product_category, tcgplayer_id, pricecharting_url, listing_url, created_at)
-		VALUES (@product_id, @name, @game_category, @game_subcategory, @product_category, @tcgplayer_id, @pricecharting_url, @listing_url, @created_at)`,
+		(product_id, name, game_category, game_subcategory, product_category, tcgplayer_id, pricecharting_url, listing_url, image_url, created_at)
+		VALUES (@product_id, @name, @game_category, @game_subcategory, @product_category, @tcgplayer_id, @pricecharting_url, @listing_url, @image_url, @created_at)`,
 		h.client.Project(), h.dataset)
 	q := h.client.Query(sql)
 	q.Parameters = []bigquery.QueryParameter{
@@ -136,6 +165,7 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		{Name: "tcgplayer_id", Value: req.TcgplayerID},
 		{Name: "pricecharting_url", Value: req.PricechartingURL},
 		{Name: "listing_url", Value: req.ListingURL},
+		{Name: "image_url", Value: imageURL},
 		{Name: "created_at", Value: createdAt},
 	}
 
@@ -193,6 +223,10 @@ func (h *ProductHandler) Update(c *gin.Context) {
 	if req.ListingURL != "" {
 		setClauses = append(setClauses, "listing_url = @listing_url")
 		params = append(params, bigquery.QueryParameter{Name: "listing_url", Value: req.ListingURL})
+	}
+	if req.ImageURL != "" {
+		setClauses = append(setClauses, "image_url = @image_url")
+		params = append(params, bigquery.QueryParameter{Name: "image_url", Value: req.ImageURL})
 	}
 
 	if len(setClauses) == 0 {
