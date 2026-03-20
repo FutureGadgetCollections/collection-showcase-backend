@@ -11,12 +11,13 @@ import (
 )
 
 type ProductHandler struct {
-	client  *bigquery.Client
-	dataset string
+	client      *bigquery.Client
+	dataset     string
+	triggerSync func()
 }
 
-func NewProductHandler(client *bigquery.Client, dataset string) *ProductHandler {
-	return &ProductHandler{client: client, dataset: dataset}
+func NewProductHandler(client *bigquery.Client, dataset string, triggerSync func()) *ProductHandler {
+	return &ProductHandler{client: client, dataset: dataset, triggerSync: triggerSync}
 }
 
 type Product struct {
@@ -149,6 +150,9 @@ func (h *ProductHandler) Create(c *gin.Context) {
 	}
 
 	c.JSON(201, gin.H{"product_id": id})
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
 
 func (h *ProductHandler) Update(c *gin.Context) {
@@ -221,6 +225,9 @@ func (h *ProductHandler) Update(c *gin.Context) {
 	}
 
 	c.Status(200)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
 
 func (h *ProductHandler) Delete(c *gin.Context) {
@@ -250,4 +257,7 @@ func (h *ProductHandler) Delete(c *gin.Context) {
 	}
 
 	c.Status(204)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }

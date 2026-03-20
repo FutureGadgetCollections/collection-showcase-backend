@@ -11,12 +11,13 @@ import (
 )
 
 type TransactionHandler struct {
-	client  *bigquery.Client
-	dataset string
+	client      *bigquery.Client
+	dataset     string
+	triggerSync func()
 }
 
-func NewTransactionHandler(client *bigquery.Client, dataset string) *TransactionHandler {
-	return &TransactionHandler{client: client, dataset: dataset}
+func NewTransactionHandler(client *bigquery.Client, dataset string, triggerSync func()) *TransactionHandler {
+	return &TransactionHandler{client: client, dataset: dataset, triggerSync: triggerSync}
 }
 
 type Transaction struct {
@@ -161,6 +162,9 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	}
 
 	c.JSON(201, gin.H{"transaction_id": id})
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
 
 func (h *TransactionHandler) Update(c *gin.Context) {
@@ -246,6 +250,9 @@ func (h *TransactionHandler) Update(c *gin.Context) {
 	}
 
 	c.Status(200)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
 
 func (h *TransactionHandler) Delete(c *gin.Context) {
@@ -268,4 +275,7 @@ func (h *TransactionHandler) Delete(c *gin.Context) {
 	}
 
 	c.Status(204)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }

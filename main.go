@@ -7,10 +7,13 @@ import (
 	"strings"
 
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/storage"
 	firebase "firebase.google.com/go/v4"
+	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/datasync"
 	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/handlers"
 	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/middleware"
 	"github.com/gin-gonic/gin"
+	"google.golang.org/api/drive/v3"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -26,6 +29,8 @@ func main() {
 	marketDataset := getEnv("BQ_MARKET_DATASET", "market_data")
 	port := getEnv("PORT", "8080")
 	allowedEmails := strings.Split(getEnv("ALLOWED_EMAILS", ""), ",")
+	gcsBucket := getEnv("GCS_DATA_BUCKET", "collection-showcase-data")
+	driveFolderID := getEnv("DRIVE_FOLDER_ID", "19lv9yCm4zWQHxr0K3DI7jBW3fp18b0li")
 
 	ctx := context.Background()
 	bqClient, err := bigquery.NewClient(ctx, project)
@@ -33,6 +38,19 @@ func main() {
 		log.Fatalf("failed to create bigquery client: %v", err)
 	}
 	defer bqClient.Close()
+
+	gcsClient, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Fatalf("failed to create gcs client: %v", err)
+	}
+	defer gcsClient.Close()
+
+	driveSvc, err := drive.NewService(ctx)
+	if err != nil {
+		log.Fatalf("failed to create drive service: %v", err)
+	}
+
+	syncer := datasync.New(bqClient, gcsClient, driveSvc, project, inventoryDataset, marketDataset, gcsBucket, driveFolderID)
 
 	fbApp, err := firebase.NewApp(ctx, nil)
 	if err != nil {
@@ -62,14 +80,14 @@ func main() {
 
 	requireAuth := middleware.RequireAuth(authClient, allowedEmails)
 
-	ph := handlers.NewProductHandler(bqClient, inventoryDataset)
+	ph := handlers.NewProductHandler(bqClient, inventoryDataset, syncer.Trigger)
 	router.GET("/products", ph.List)
 	router.GET("/products/:id", ph.Get)
 	router.POST("/products", requireAuth, ph.Create)
 	router.PUT("/products/:id", requireAuth, ph.Update)
 	router.DELETE("/products/:id", requireAuth, ph.Delete)
 
-	th := handlers.NewTransactionHandler(bqClient, inventoryDataset)
+	th := handlers.NewTransactionHandler(bqClient, inventoryDataset, syncer.Trigger)
 	router.GET("/transactions", th.List)
 	router.GET("/transactions/:id", th.Get)
 	router.POST("/transactions", requireAuth, th.Create)
@@ -80,7 +98,7 @@ func main() {
 	router.GET("/collection", ch.List)
 	router.GET("/collection/:product_id", ch.Get)
 
-	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset)
+	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset, syncer.Trigger)
 	router.GET("/price-history", prh.List)
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)

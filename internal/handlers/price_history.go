@@ -11,12 +11,13 @@ import (
 )
 
 type PriceHistoryHandler struct {
-	client  *bigquery.Client
-	dataset string
+	client      *bigquery.Client
+	dataset     string
+	triggerSync func()
 }
 
-func NewPriceHistoryHandler(client *bigquery.Client, dataset string) *PriceHistoryHandler {
-	return &PriceHistoryHandler{client: client, dataset: dataset}
+func NewPriceHistoryHandler(client *bigquery.Client, dataset string, triggerSync func()) *PriceHistoryHandler {
+	return &PriceHistoryHandler{client: client, dataset: dataset, triggerSync: triggerSync}
 }
 
 type PriceHistory struct {
@@ -133,6 +134,9 @@ func (h *PriceHistoryHandler) Create(c *gin.Context) {
 	}
 
 	c.JSON(201, gin.H{"record_id": id})
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
 
 func (h *PriceHistoryHandler) Delete(c *gin.Context) {
@@ -176,4 +180,7 @@ func (h *PriceHistoryHandler) Delete(c *gin.Context) {
 	}
 
 	c.Status(204)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
 }
