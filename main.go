@@ -15,11 +15,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const version = "1.0.0"
+
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return defaultVal
+}
+
+// mask keeps the first and last character and replaces the rest with ***.
+func mask(s string) string {
+	if len(s) <= 2 {
+		return s
+	}
+	return string(s[0]) + "***" + string(s[len(s)-1])
 }
 
 func main() {
@@ -75,6 +85,23 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	router.GET("/info", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"version": version,
+			"env": gin.H{
+				"BQ_PROJECT":          project,
+				"BQ_INVENTORY_DATASET": inventoryDataset,
+				"BQ_MARKET_DATASET":   marketDataset,
+				"GCS_DATA_BUCKET":     gcsBucket,
+				"FIREBASE_PROJECT_ID": firebaseProjectID,
+				"ALLOWED_EMAILS":      getEnv("ALLOWED_EMAILS", "(not set)"),
+				"GITHUB_TOKEN":        mask(ghToken),
+				"GITHUB_OWNER":        ghOwner,
+				"GITHUB_REPO":         ghRepo,
+			},
+		})
+	})
+
 	requireAuth := middleware.RequireAuth(authClient, allowedEmails)
 
 	ph := handlers.NewProductHandler(bqClient, inventoryDataset, syncer.Trigger)
@@ -100,7 +127,7 @@ func main() {
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
 
-	log.Printf("starting server on :%s", port)
+	log.Printf("starting server on :%s (version %s)", port, version)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
