@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/civil"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
@@ -240,7 +241,7 @@ type productRow struct {
 type transactionRow struct {
 	TransactionID   string    `json:"transaction_id" bigquery:"transaction_id"`
 	ProductID       string    `json:"product_id" bigquery:"product_id"`
-	TransactionDate string    `json:"transaction_date" bigquery:"transaction_date"`
+	TransactionDate civil.Date `json:"transaction_date" bigquery:"transaction_date"`
 	Price           float64   `json:"price" bigquery:"price"`
 	Quantity        int64     `json:"quantity" bigquery:"quantity"`
 	TransactionType string    `json:"transaction_type" bigquery:"transaction_type"`
@@ -259,7 +260,7 @@ type collectionRow struct {
 type priceHistoryRow struct {
 	RecordID           string    `json:"record_id" bigquery:"record_id"`
 	ProductID          string    `json:"product_id" bigquery:"product_id"`
-	SnapshotDate       string    `json:"snapshot_date" bigquery:"snapshot_date"`
+	SnapshotDate       civil.Date `json:"snapshot_date" bigquery:"snapshot_date"`
 	Source             string    `json:"source" bigquery:"source"`
 	MarketPrice        float64   `json:"market_price" bigquery:"market_price"`
 	MedianPrice        float64   `json:"median_price" bigquery:"median_price"`
