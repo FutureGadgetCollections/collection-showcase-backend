@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -143,7 +144,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		{Name: "transaction_id", Value: id},
 		{Name: "product_id", Value: req.ProductID},
 		{Name: "transaction_date", Value: req.TransactionDate},
-		{Name: "price", Value: req.Price},
+		{Name: "price", Value: new(big.Rat).SetFloat64(req.Price)},
 		{Name: "quantity", Value: req.Quantity},
 		{Name: "transaction_type", Value: req.TransactionType},
 		{Name: "platform", Value: req.Platform},
@@ -201,7 +202,7 @@ func (h *TransactionHandler) Update(c *gin.Context) {
 	}
 	if req.Price != 0 {
 		setClauses = append(setClauses, "price = @price")
-		params = append(params, bigquery.QueryParameter{Name: "price", Value: req.Price})
+		params = append(params, bigquery.QueryParameter{Name: "price", Value: new(big.Rat).SetFloat64(req.Price)})
 	}
 	if req.Quantity != 0 {
 		setClauses = append(setClauses, "quantity = @quantity")

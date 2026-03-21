@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -115,8 +116,8 @@ func (h *PriceHistoryHandler) Create(c *gin.Context) {
 		{Name: "product_id", Value: req.ProductID},
 		{Name: "snapshot_date", Value: req.SnapshotDate},
 		{Name: "source", Value: req.Source},
-		{Name: "market_price", Value: req.MarketPrice},
-		{Name: "median_price", Value: req.MedianPrice},
+		{Name: "market_price", Value: new(big.Rat).SetFloat64(req.MarketPrice)},
+		{Name: "median_price", Value: new(big.Rat).SetFloat64(req.MedianPrice)},
 		{Name: "sell_through_rate", Value: req.SellThroughRate},
 		{Name: "distinct_buyer_count", Value: req.DistinctBuyerCount},
 		{Name: "listed_count", Value: req.ListedCount},

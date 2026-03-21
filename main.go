@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const version = "1.0.3"
+const version = "1.0.4"
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
