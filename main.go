@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const version = "1.0.5"
+const version = "1.0.6"
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
@@ -43,6 +43,7 @@ func main() {
 	ghToken := getEnv("GITHUB_TOKEN", "")
 	ghOwner := getEnv("GITHUB_OWNER", "")
 	ghRepo := getEnv("GITHUB_REPO", "")
+	syncSecret := getEnv("SYNC_SECRET", "")
 
 	ctx := context.Background()
 	bqClient, err := bigquery.NewClient(ctx, project)
@@ -127,10 +128,12 @@ func main() {
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
 
-	router.POST("/sync", requireAuth, func(c *gin.Context) {
+	syncHandler := func(c *gin.Context) {
 		syncer.Trigger()
 		c.JSON(202, gin.H{"status": "sync started"})
-	})
+	}
+	router.POST("/sync", requireAuth, syncHandler)
+	router.POST("/sync/scheduled", middleware.RequireSyncSecret(syncSecret), syncHandler)
 
 	log.Printf("starting server on :%s (version %s)", port, version)
 	if err := router.Run(":" + port); err != nil {

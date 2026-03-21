@@ -154,6 +154,7 @@ Returns the running version and masked environment config:
 | GET | `/health` | — | Returns `{"status":"ok"}` |
 | GET | `/info` | — | Returns version and masked env vars |
 | POST | `/sync` | required | Triggers a BQ → GCS + GitHub data file sync; returns `202 {"status":"sync started"}` immediately and runs in the background |
+| POST | `/sync/scheduled` | `X-Sync-Token` header | Same as above but authenticated via `SYNC_SECRET` env var — intended for Cloud Scheduler |
 
 ### Products
 
@@ -453,6 +454,52 @@ cp .env.example .env
 source .env
 go run .
 ```
+
+---
+
+## Scheduled Data Sync
+
+BQ writes no longer auto-trigger a GCS/GitHub sync. Instead, a daily Cloud Scheduler job hits `POST /sync/scheduled` with a shared secret. The frontend can also trigger an on-demand sync via `POST /sync` (Firebase auth required).
+
+### How it works
+
+- `POST /sync` — for the frontend "Refresh data files" button; requires Firebase auth
+- `POST /sync/scheduled` — for Cloud Scheduler; authenticated via `X-Sync-Token: <SYNC_SECRET>`
+- Both endpoints fire `SyncAll` in the background and return `202` immediately
+
+### Cloud Scheduler setup
+
+```bash
+PROJECT=future-gadget-labs-483502
+BACKEND_URL=https://collection-showcase-957536135168.us-central1.run.app
+SYNC_SECRET=<your-secret>   # same value set in Cloud Run env var SYNC_SECRET
+
+# Create the job (runs daily at 02:00 UTC)
+gcloud scheduler jobs create http daily-data-sync \
+  --location=us-central1 \
+  --schedule="0 2 * * *" \
+  --uri="${BACKEND_URL}/sync/scheduled" \
+  --http-method=POST \
+  --headers="X-Sync-Token=${SYNC_SECRET},Content-Type=application/json" \
+  --message-body="{}" \
+  --project=$PROJECT
+```
+
+To run it manually:
+```bash
+gcloud scheduler jobs run daily-data-sync --location=us-central1 --project=$PROJECT
+```
+
+To update the schedule or secret:
+```bash
+gcloud scheduler jobs update http daily-data-sync \
+  --location=us-central1 \
+  --schedule="0 2 * * *" \
+  --headers="X-Sync-Token=${SYNC_SECRET},Content-Type=application/json" \
+  --project=$PROJECT
+```
+
+> **`SYNC_SECRET`** must be added as a Cloud Run env var (`--set-env-vars SYNC_SECRET=<value>`). Generate with `openssl rand -hex 32`. If the env var is empty the endpoint always rejects.
 
 ---
 
