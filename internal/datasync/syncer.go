@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	"math/big"
+
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
 	"cloud.google.com/go/storage"
@@ -225,6 +227,14 @@ func queryAll[T any](ctx context.Context, bq *bigquery.Client, sql string) ([]T,
 
 // BQ row types — mirrors the table schemas for JSON serialization.
 
+func ratFloat(r *big.Rat) float64 {
+	if r == nil {
+		return 0
+	}
+	f, _ := r.Float64()
+	return f
+}
+
 type productRow struct {
 	ProductID        string    `json:"product_id" bigquery:"product_id"`
 	Name             string    `json:"name" bigquery:"name"`
@@ -239,33 +249,81 @@ type productRow struct {
 }
 
 type transactionRow struct {
-	TransactionID   string    `json:"transaction_id" bigquery:"transaction_id"`
-	ProductID       string    `json:"product_id" bigquery:"product_id"`
+	TransactionID   string     `json:"transaction_id" bigquery:"transaction_id"`
+	ProductID       string     `json:"product_id" bigquery:"product_id"`
 	TransactionDate civil.Date `json:"transaction_date" bigquery:"transaction_date"`
-	Price           float64   `json:"price" bigquery:"price"`
-	Quantity        int64     `json:"quantity" bigquery:"quantity"`
-	TransactionType string    `json:"transaction_type" bigquery:"transaction_type"`
-	Platform        string    `json:"platform" bigquery:"platform"`
-	Notes           string    `json:"notes" bigquery:"notes"`
-	CreatedAt       time.Time `json:"created_at" bigquery:"created_at"`
+	Price           *big.Rat   `json:"-" bigquery:"price"`
+	Quantity        int64      `json:"quantity" bigquery:"quantity"`
+	TransactionType string     `json:"transaction_type" bigquery:"transaction_type"`
+	Platform        string     `json:"platform" bigquery:"platform"`
+	Notes           string     `json:"notes" bigquery:"notes"`
+	CreatedAt       time.Time  `json:"created_at" bigquery:"created_at"`
+}
+
+func (r transactionRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		TransactionID   string     `json:"transaction_id"`
+		ProductID       string     `json:"product_id"`
+		TransactionDate civil.Date `json:"transaction_date"`
+		Price           float64    `json:"price"`
+		Quantity        int64      `json:"quantity"`
+		TransactionType string     `json:"transaction_type"`
+		Platform        string     `json:"platform"`
+		Notes           string     `json:"notes"`
+		CreatedAt       time.Time  `json:"created_at"`
+	}{
+		r.TransactionID, r.ProductID, r.TransactionDate,
+		ratFloat(r.Price),
+		r.Quantity, r.TransactionType, r.Platform, r.Notes, r.CreatedAt,
+	})
 }
 
 type collectionRow struct {
-	ProductID     string  `json:"product_id" bigquery:"product_id"`
-	Quantity      int64   `json:"quantity" bigquery:"quantity"`
-	AvgUnitCost   float64 `json:"avg_unit_cost" bigquery:"avg_unit_cost"`
-	TotalInvested float64 `json:"total_invested" bigquery:"total_invested"`
+	ProductID     string   `json:"product_id" bigquery:"product_id"`
+	Quantity      int64    `json:"quantity" bigquery:"quantity"`
+	AvgUnitCost   *big.Rat `json:"-" bigquery:"avg_unit_cost"`
+	TotalInvested *big.Rat `json:"-" bigquery:"total_invested"`
+}
+
+func (r collectionRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ProductID     string  `json:"product_id"`
+		Quantity      int64   `json:"quantity"`
+		AvgUnitCost   float64 `json:"avg_unit_cost"`
+		TotalInvested float64 `json:"total_invested"`
+	}{
+		r.ProductID, r.Quantity, ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested),
+	})
 }
 
 type priceHistoryRow struct {
-	RecordID           string    `json:"record_id" bigquery:"record_id"`
-	ProductID          string    `json:"product_id" bigquery:"product_id"`
+	RecordID           string     `json:"record_id" bigquery:"record_id"`
+	ProductID          string     `json:"product_id" bigquery:"product_id"`
 	SnapshotDate       civil.Date `json:"snapshot_date" bigquery:"snapshot_date"`
-	Source             string    `json:"source" bigquery:"source"`
-	MarketPrice        float64   `json:"market_price" bigquery:"market_price"`
-	MedianPrice        float64   `json:"median_price" bigquery:"median_price"`
-	SellThroughRate    float64   `json:"sell_through_rate" bigquery:"sell_through_rate"`
-	DistinctBuyerCount int64     `json:"distinct_buyer_count" bigquery:"distinct_buyer_count"`
-	ListedCount        int64     `json:"listed_count" bigquery:"listed_count"`
-	CreatedAt          time.Time `json:"created_at" bigquery:"created_at"`
+	Source             string     `json:"source" bigquery:"source"`
+	MarketPrice        *big.Rat   `json:"-" bigquery:"market_price"`
+	MedianPrice        *big.Rat   `json:"-" bigquery:"median_price"`
+	SellThroughRate    float64    `json:"sell_through_rate" bigquery:"sell_through_rate"`
+	DistinctBuyerCount int64      `json:"distinct_buyer_count" bigquery:"distinct_buyer_count"`
+	ListedCount        int64      `json:"listed_count" bigquery:"listed_count"`
+	CreatedAt          time.Time  `json:"created_at" bigquery:"created_at"`
+}
+
+func (r priceHistoryRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		RecordID           string     `json:"record_id"`
+		ProductID          string     `json:"product_id"`
+		SnapshotDate       civil.Date `json:"snapshot_date"`
+		Source             string     `json:"source"`
+		MarketPrice        float64    `json:"market_price"`
+		MedianPrice        float64    `json:"median_price"`
+		SellThroughRate    float64    `json:"sell_through_rate"`
+		DistinctBuyerCount int64      `json:"distinct_buyer_count"`
+		ListedCount        int64      `json:"listed_count"`
+		CreatedAt          time.Time  `json:"created_at"`
+	}{
+		r.RecordID, r.ProductID, r.SnapshotDate, r.Source,
+		ratFloat(r.MarketPrice), ratFloat(r.MedianPrice),
+		r.SellThroughRate, r.DistinctBuyerCount, r.ListedCount, r.CreatedAt,
+	})
 }
