@@ -249,7 +249,7 @@ func (h *TransactionHandler) Update(c *gin.Context) {
 		return
 	}
 
-	c.Status(200)
+	c.Status(204)
 	if h.triggerSync != nil {
 		h.triggerSync()
 	}
