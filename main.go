@@ -128,6 +128,9 @@ func main() {
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
 
+	pfh := handlers.NewPriceFetchHandler(bqClient, inventoryDataset, marketDataset)
+	router.POST("/price-history/fetch", requireAuth, pfh.Fetch)
+
 	syncHandler := func(c *gin.Context) {
 		syncer.Trigger()
 		c.JSON(202, gin.H{"status": "sync started"})
