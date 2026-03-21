@@ -233,6 +233,7 @@ type productRow struct {
 	TcgplayerID      string    `json:"tcgplayer_id" bigquery:"tcgplayer_id"`
 	PricechartingURL string    `json:"pricecharting_url" bigquery:"pricecharting_url"`
 	ListingURL       string    `json:"listing_url" bigquery:"listing_url"`
+	ImageURL         string    `json:"image_url" bigquery:"image_url"`
 	CreatedAt        time.Time `json:"created_at" bigquery:"created_at"`
 }
 
