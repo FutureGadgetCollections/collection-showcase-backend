@@ -130,6 +130,7 @@ func main() {
 
 	pfh := handlers.NewPriceFetchHandler(bqClient, inventoryDataset, marketDataset)
 	router.POST("/price-history/fetch", requireAuth, pfh.Fetch)
+	router.POST("/price-history/fetch/scheduled", middleware.RequireSyncSecret(syncSecret), pfh.Fetch)
 
 	syncHandler := func(c *gin.Context) {
 		syncer.Trigger()

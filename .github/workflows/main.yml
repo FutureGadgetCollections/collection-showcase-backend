@@ -68,3 +68,34 @@ jobs:
             --project=future-gadget-labs-483502 \
             --image=us-central1-docker.pkg.dev/future-gadget-labs-483502/tcg-collection/collection-showcase:${{ github.sha }} \
             --update-env-vars="GITHUB_TOKEN=${{ secrets.DATA_SYNC_PAT }}"
+
+      - name: Set up daily price fetch scheduler
+        run: |
+          PROJECT=future-gadget-labs-483502
+          REGION=us-central1
+          SERVICE_URL=$(gcloud run services describe collection-showcase \
+            --region=$REGION \
+            --project=$PROJECT \
+            --format='value(status.url)')
+
+          gcloud scheduler jobs create http fetch-prices-daily \
+            --project=$PROJECT \
+            --location=$REGION \
+            --schedule="0 8 * * *" \
+            --time-zone="America/New_York" \
+            --uri="${SERVICE_URL}/price-history/fetch/scheduled" \
+            --message-body="" \
+            --headers="X-Sync-Token=${{ secrets.SYNC_SECRET }},Content-Type=application/json" \
+            --http-method=POST \
+            --attempt-deadline=30m \
+            2>/dev/null || \
+          gcloud scheduler jobs update http fetch-prices-daily \
+            --project=$PROJECT \
+            --location=$REGION \
+            --schedule="0 8 * * *" \
+            --time-zone="America/New_York" \
+            --uri="${SERVICE_URL}/price-history/fetch/scheduled" \
+            --message-body="" \
+            --headers="X-Sync-Token=${{ secrets.SYNC_SECRET }},Content-Type=application/json" \
+            --http-method=POST \
+            --attempt-deadline=30m
