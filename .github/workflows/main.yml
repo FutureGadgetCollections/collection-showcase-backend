@@ -60,3 +60,11 @@ jobs:
             us-central1-docker.pkg.dev/future-gadget-labs-483502/tcg-collection/collection-showcase:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run services update collection-showcase \
+            --region=us-central1 \
+            --project=future-gadget-labs-483502 \
+            --image=us-central1-docker.pkg.dev/future-gadget-labs-483502/tcg-collection/collection-showcase:${{ github.sha }} \
+            --update-env-vars="GITHUB_TOKEN=${{ secrets.DATA_SYNC_PAT }}"
