@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const version = "1.0.4"
+const version = "1.0.5"
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
@@ -104,14 +104,14 @@ func main() {
 
 	requireAuth := middleware.RequireAuth(authClient, allowedEmails)
 
-	ph := handlers.NewProductHandler(bqClient, inventoryDataset, syncer.Trigger)
+	ph := handlers.NewProductHandler(bqClient, inventoryDataset, nil)
 	router.GET("/products", ph.List)
 	router.GET("/products/:id", ph.Get)
 	router.POST("/products", requireAuth, ph.Create)
 	router.PUT("/products/:id", requireAuth, ph.Update)
 	router.DELETE("/products/:id", requireAuth, ph.Delete)
 
-	th := handlers.NewTransactionHandler(bqClient, inventoryDataset, syncer.Trigger)
+	th := handlers.NewTransactionHandler(bqClient, inventoryDataset, nil)
 	router.GET("/transactions", th.List)
 	router.GET("/transactions/:id", th.Get)
 	router.POST("/transactions", requireAuth, th.Create)
@@ -122,10 +122,15 @@ func main() {
 	router.GET("/collection", ch.List)
 	router.GET("/collection/:product_id", ch.Get)
 
-	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset, syncer.Trigger)
+	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset, nil)
 	router.GET("/price-history", prh.List)
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
+
+	router.POST("/sync", requireAuth, func(c *gin.Context) {
+		syncer.Trigger()
+		c.JSON(202, gin.H{"status": "sync started"})
+	})
 
 	log.Printf("starting server on :%s (version %s)", port, version)
 	if err := router.Run(":" + port); err != nil {

@@ -61,6 +61,7 @@ erDiagram
         STRING tcgplayer_id
         STRING pricecharting_url
         STRING listing_url
+        STRING image_url
         TIMESTAMP created_at
     }
 
@@ -133,11 +134,26 @@ Base URL (local): `http://localhost:8080`
 
 All list endpoints accept `?limit=` (default 1000) and `?offset=` query params.
 
-### Health
+### Version check
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Returns `{"status":"ok"}` |
+To verify which version is deployed:
+
+```bash
+curl https://collection-showcase-957536135168.us-central1.run.app/info
+```
+
+Returns the running version and masked environment config:
+```json
+{"version":"1.0.1","env":{...}}
+```
+
+### Health & sync
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Returns `{"status":"ok"}` |
+| GET | `/info` | — | Returns version and masked env vars |
+| POST | `/sync` | required | Triggers a BQ → GCS + GitHub data file sync; returns `202 {"status":"sync started"}` immediately and runs in the background |
 
 ### Products
 
@@ -158,7 +174,8 @@ All list endpoints accept `?limit=` (default 1000) and `?offset=` query params.
   "product_category": "etb",
   "tcgplayer_id": "123456",
   "pricecharting_url": "https://www.pricecharting.com/...",
-  "listing_url": "https://www.ebay.com/itm/..."
+  "listing_url": "https://www.ebay.com/itm/...",
+  "image_url": "https://..."
 }
 ```
 
