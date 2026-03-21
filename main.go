@@ -49,7 +49,7 @@ func main() {
 
 	syncer := datasync.New(bqClient, gcsClient, project, inventoryDataset, marketDataset, gcsBucket, ghToken, ghOwner, ghRepo)
 
-	fbApp, err := firebase.NewApp(ctx, &firebase.Options{ProjectID: firebaseProjectID})
+	fbApp, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: firebaseProjectID})
 	if err != nil {
 		log.Fatalf("failed to init firebase app: %v", err)
 	}
