@@ -73,11 +73,27 @@ upsert_scheduler collection-showcase-market-price-update-daily \
   --message-body="" \
   --oauth-service-account-email="${SCHEDULER_SA}" \
   --http-method=POST \
-  --attempt-deadline=35m \
+  --attempt-deadline=30m \
   --description="collection-showcase: daily TCGPlayer price fetch for all tracked products"
 
 # ── Data sync ──────────────────────────────────────────────────────────────────
 echo "--- collection-showcase-data-sync ---"
+
+# Read GITHUB_TOKEN from the existing Cloud Run service if not already set.
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  GITHUB_TOKEN=$(gcloud run services describe collection-showcase \
+    --region=$REGION --project=$PROJECT \
+    --format="json(spec.template.spec.containers[0].env)" \
+    | python3 -c "
+import sys, json
+envs = json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']
+for e in envs:
+    if e['name'] == 'GITHUB_TOKEN':
+        print(e['value'])
+        break
+")
+fi
+
 upsert_run_job collection-showcase-data-sync \
   --image=$IMAGE \
   --command="/syncdata" \
@@ -85,8 +101,7 @@ upsert_run_job collection-showcase-data-sync \
   --max-retries=0 \
   --memory=512Mi \
   --labels=$LABEL \
-  --set-env-vars="BQ_PROJECT=${PROJECT},BQ_INVENTORY_DATASET=inventory,BQ_MARKET_DATASET=market_data,GCS_DATA_BUCKET=collection-showcase-data,GITHUB_OWNER=FutureGadgetCollections,GITHUB_REPO=collection-showcase-data" \
-  --update-secrets="GITHUB_TOKEN=GITHUB_TOKEN:latest"
+  --set-env-vars="BQ_PROJECT=${PROJECT},BQ_INVENTORY_DATASET=inventory,BQ_MARKET_DATASET=market_data,GCS_DATA_BUCKET=collection-showcase-data,GITHUB_OWNER=FutureGadgetCollections,GITHUB_REPO=collection-showcase-data,GITHUB_TOKEN=${GITHUB_TOKEN}"
 
 grant_invoker collection-showcase-data-sync
 
