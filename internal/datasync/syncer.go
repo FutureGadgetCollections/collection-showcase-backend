@@ -3,38 +3,42 @@ package datasync
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/storage"
-	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/iterator"
 )
 
 type Syncer struct {
-	bq            *bigquery.Client
-	gcs           *storage.Client
-	driveSvc      *drive.Service
-	project       string
-	inventoryDS   string
-	marketDS      string
-	gcsBucket     string
-	driveFolderID string
+	bq          *bigquery.Client
+	gcs         *storage.Client
+	project     string
+	inventoryDS string
+	marketDS    string
+	gcsBucket   string
+	ghToken     string
+	ghOwner     string
+	ghRepo      string
 }
 
-func New(bq *bigquery.Client, gcs *storage.Client, driveSvc *drive.Service, project, inventoryDS, marketDS, gcsBucket, driveFolderID string) *Syncer {
+func New(bq *bigquery.Client, gcs *storage.Client, project, inventoryDS, marketDS, gcsBucket, ghToken, ghOwner, ghRepo string) *Syncer {
 	return &Syncer{
-		bq:            bq,
-		gcs:           gcs,
-		driveSvc:      driveSvc,
-		project:       project,
-		inventoryDS:   inventoryDS,
-		marketDS:      marketDS,
-		gcsBucket:     gcsBucket,
-		driveFolderID: driveFolderID,
+		bq:          bq,
+		gcs:         gcs,
+		project:     project,
+		inventoryDS: inventoryDS,
+		marketDS:    marketDS,
+		gcsBucket:   gcsBucket,
+		ghToken:     ghToken,
+		ghOwner:     ghOwner,
+		ghRepo:      ghRepo,
 	}
 }
 
@@ -99,12 +103,14 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 			return fmt.Errorf("gcs upload %s: %w", f.name, err)
 		}
 		log.Printf("datasync: GCS upload OK for %s", f.name)
-		log.Printf("datasync: upserting %s to Drive", f.name)
-		if err := s.upsertDrive(ctx, f.name, b); err != nil {
-			log.Printf("datasync: Drive upsert failed for %s: %v", f.name, err)
-			return fmt.Errorf("drive upsert %s: %w", f.name, err)
+		if s.ghToken != "" {
+			log.Printf("datasync: upserting %s to GitHub", f.name)
+			if err := s.upsertGitHub(ctx, f.name, b); err != nil {
+				log.Printf("datasync: GitHub upsert failed for %s: %v", f.name, err)
+				return fmt.Errorf("github upsert %s: %w", f.name, err)
+			}
+			log.Printf("datasync: GitHub upsert OK for %s", f.name)
 		}
-		log.Printf("datasync: Drive upsert OK for %s", f.name)
 	}
 	return nil
 }
@@ -119,23 +125,80 @@ func (s *Syncer) uploadGCS(ctx context.Context, name string, data []byte) error 
 	return w.Close()
 }
 
-func (s *Syncer) upsertDrive(ctx context.Context, name string, data []byte) error {
-	q := fmt.Sprintf("name = '%s' and '%s' in parents and trashed = false", name, s.driveFolderID)
-	list, err := s.driveSvc.Files.List().Q(q).Fields("files(id)").Context(ctx).Do()
+// upsertGitHub creates or updates a file in the GitHub repo via the Contents API.
+func (s *Syncer) upsertGitHub(ctx context.Context, name string, data []byte) error {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", s.ghOwner, s.ghRepo, name)
+
+	// Get current file SHA (required for updates).
+	sha, err := s.getGitHubFileSHA(ctx, url)
 	if err != nil {
 		return err
 	}
 
-	content := bytes.NewReader(data)
-	meta := &drive.File{Name: name, MimeType: "application/json"}
-
-	if len(list.Files) > 0 {
-		_, err = s.driveSvc.Files.Update(list.Files[0].Id, meta).Media(content).Context(ctx).Do()
-	} else {
-		meta.Parents = []string{s.driveFolderID}
-		_, err = s.driveSvc.Files.Create(meta).Media(content).Context(ctx).Do()
+	body := map[string]string{
+		"message": fmt.Sprintf("chore: sync %s", name),
+		"content": base64.StdEncoding.EncodeToString(data),
 	}
-	return err
+	if sha != "" {
+		body["sha"] = sha
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.ghToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// getGitHubFileSHA returns the blob SHA of an existing file, or "" if it doesn't exist.
+func (s *Syncer) getGitHubFileSHA(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.ghToken)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get file SHA status %d: %s", resp.StatusCode, string(b))
+	}
+
+	var result struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.SHA, nil
 }
 
 func queryAll[T any](ctx context.Context, bq *bigquery.Client, sql string) ([]T, error) {

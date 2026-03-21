@@ -13,7 +13,6 @@ import (
 	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/handlers"
 	"github.com/FutureGadgetLabs/collection-showcase-backend/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"google.golang.org/api/drive/v3"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -29,8 +28,11 @@ func main() {
 	marketDataset := getEnv("BQ_MARKET_DATASET", "market_data")
 	port := getEnv("PORT", "8080")
 	allowedEmails := strings.Split(getEnv("ALLOWED_EMAILS", ""), ",")
+	firebaseProjectID := getEnv("FIREBASE_PROJECT_ID", "collection-showcase-auth")
 	gcsBucket := getEnv("GCS_DATA_BUCKET", "collection-showcase-data")
-	driveFolderID := getEnv("DRIVE_FOLDER_ID", "19lv9yCm4zWQHxr0K3DI7jBW3fp18b0li")
+	ghToken := getEnv("GITHUB_TOKEN", "")
+	ghOwner := getEnv("GITHUB_OWNER", "")
+	ghRepo := getEnv("GITHUB_REPO", "")
 
 	ctx := context.Background()
 	bqClient, err := bigquery.NewClient(ctx, project)
@@ -45,14 +47,9 @@ func main() {
 	}
 	defer gcsClient.Close()
 
-	driveSvc, err := drive.NewService(ctx)
-	if err != nil {
-		log.Fatalf("failed to create drive service: %v", err)
-	}
+	syncer := datasync.New(bqClient, gcsClient, project, inventoryDataset, marketDataset, gcsBucket, ghToken, ghOwner, ghRepo)
 
-	syncer := datasync.New(bqClient, gcsClient, driveSvc, project, inventoryDataset, marketDataset, gcsBucket, driveFolderID)
-
-	fbApp, err := firebase.NewApp(ctx, nil)
+	fbApp, err := firebase.NewApp(ctx, &firebase.Options{ProjectID: firebaseProjectID})
 	if err != nil {
 		log.Fatalf("failed to init firebase app: %v", err)
 	}
