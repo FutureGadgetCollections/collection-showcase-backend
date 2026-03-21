@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /server .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /server . && \
+    CGO_ENABLED=0 GOOS=linux go build -o /fetchprices ./cmd/fetchprices
 
 FROM alpine:3.20
 
@@ -16,6 +17,7 @@ RUN apk --no-cache add \
     && addgroup -S appuser && adduser -S appuser -G appuser
 
 COPY --from=builder /server /server
+COPY --from=builder /fetchprices /fetchprices
 
 EXPOSE 8080
 
