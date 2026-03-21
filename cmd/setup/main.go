@@ -133,21 +133,57 @@ func main() {
 	}
 
 	viewSQL := fmt.Sprintf(`CREATE OR REPLACE VIEW `+"`%s.inventory.collection`"+` AS
-SELECT
+WITH tx AS (
+  SELECT
     product_id,
-    quantity,
-    SAFE_DIVIDE(total_buy_value, total_buy_qty) AS avg_unit_cost,
-    total_buy_value AS total_invested
-FROM (
-    SELECT
-        product_id,
-        SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END) AS quantity,
-        SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END) AS total_buy_value,
-        SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END) AS total_buy_qty
-    FROM `+"`%s.inventory.transactions`"+`
-    GROUP BY product_id
+    SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END)          AS total_buy_qty,
+    SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END)  AS total_buy_value,
+    SUM(CASE WHEN transaction_type = 'sell' THEN quantity ELSE 0 END)         AS total_sell_qty,
+    SUM(CASE WHEN transaction_type = 'sell' THEN price * quantity ELSE 0 END) AS total_sell_value,
+    SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END)  AS quantity,
+    MIN(CASE WHEN transaction_type = 'buy' THEN transaction_date END)         AS first_buy_date
+  FROM `+"`%s.inventory.transactions`"+`
+  GROUP BY product_id
+),
+latest_price AS (
+  SELECT product_id, market_price AS latest_market_price
+  FROM `+"`%s.market_data.price_history`"+`
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY snapshot_date DESC) = 1
+),
+base AS (
+  SELECT
+    tx.product_id,
+    tx.quantity,
+    tx.total_buy_value                                                              AS total_invested,
+    SAFE_DIVIDE(tx.total_buy_value, tx.total_buy_qty)                               AS avg_unit_cost,
+    tx.total_sell_value
+      - SAFE_DIVIDE(tx.total_buy_value, tx.total_buy_qty) * tx.total_sell_qty       AS realized_gain,
+    lp.latest_market_price,
+    lp.latest_market_price * tx.quantity
+      - SAFE_DIVIDE(tx.total_buy_value, tx.total_buy_qty) * tx.quantity             AS unrealized_gain,
+    tx.first_buy_date,
+    DATE_DIFF(CURRENT_DATE(), tx.first_buy_date, DAY)                               AS days_held
+  FROM tx
+  LEFT JOIN latest_price lp ON lp.product_id = tx.product_id
+  WHERE tx.quantity > 0
 )
-WHERE quantity > 0`, project, project)
+SELECT
+  product_id,
+  quantity,
+  avg_unit_cost,
+  total_invested,
+  realized_gain,
+  unrealized_gain,
+  latest_market_price,
+  first_buy_date,
+  days_held,
+  SAFE_DIVIDE(realized_gain + unrealized_gain, total_invested)                      AS roi,
+  CASE
+    WHEN days_held > 0 THEN
+      POWER(1 + SAFE_DIVIDE(realized_gain + unrealized_gain, total_invested), 365.0 / days_held) - 1
+    ELSE NULL
+  END                                                                                AS annualized_roi
+FROM base`, project, project, project)
 
 	q := client.Query(viewSQL)
 	job, err := q.Run(ctx)

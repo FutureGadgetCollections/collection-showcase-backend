@@ -235,6 +235,14 @@ func ratFloat(r *big.Rat) float64 {
 	return f
 }
 
+func ratFloatPtr(r *big.Rat) *float64 {
+	if r == nil {
+		return nil
+	}
+	f, _ := r.Float64()
+	return &f
+}
+
 type productRow struct {
 	ProductID        string    `json:"product_id" bigquery:"product_id"`
 	Name             string    `json:"name" bigquery:"name"`
@@ -279,20 +287,38 @@ func (r transactionRow) MarshalJSON() ([]byte, error) {
 }
 
 type collectionRow struct {
-	ProductID     string   `json:"product_id" bigquery:"product_id"`
-	Quantity      int64    `json:"quantity" bigquery:"quantity"`
-	AvgUnitCost   *big.Rat `json:"-" bigquery:"avg_unit_cost"`
-	TotalInvested *big.Rat `json:"-" bigquery:"total_invested"`
+	ProductID         string     `json:"product_id" bigquery:"product_id"`
+	Quantity          int64      `json:"quantity" bigquery:"quantity"`
+	AvgUnitCost       *big.Rat   `json:"-" bigquery:"avg_unit_cost"`
+	TotalInvested     *big.Rat   `json:"-" bigquery:"total_invested"`
+	RealizedGain      *big.Rat   `json:"-" bigquery:"realized_gain"`
+	UnrealizedGain    *big.Rat   `json:"-" bigquery:"unrealized_gain"`
+	LatestMarketPrice *big.Rat   `json:"-" bigquery:"latest_market_price"`
+	FirstBuyDate      civil.Date `json:"first_buy_date" bigquery:"first_buy_date"`
+	DaysHeld          int64      `json:"days_held" bigquery:"days_held"`
+	ROI               *big.Rat   `json:"-" bigquery:"roi"`
+	AnnualizedROI     *big.Rat   `json:"-" bigquery:"annualized_roi"`
 }
 
 func (r collectionRow) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ProductID     string  `json:"product_id"`
-		Quantity      int64   `json:"quantity"`
-		AvgUnitCost   float64 `json:"avg_unit_cost"`
-		TotalInvested float64 `json:"total_invested"`
+		ProductID         string     `json:"product_id"`
+		Quantity          int64      `json:"quantity"`
+		AvgUnitCost       float64    `json:"avg_unit_cost"`
+		TotalInvested     float64    `json:"total_invested"`
+		RealizedGain      float64    `json:"realized_gain"`
+		UnrealizedGain    *float64   `json:"unrealized_gain"`
+		LatestMarketPrice *float64   `json:"latest_market_price"`
+		FirstBuyDate      civil.Date `json:"first_buy_date"`
+		DaysHeld          int64      `json:"days_held"`
+		ROI               *float64   `json:"roi"`
+		AnnualizedROI     *float64   `json:"annualized_roi"`
 	}{
-		r.ProductID, r.Quantity, ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested),
+		r.ProductID, r.Quantity,
+		ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested), ratFloat(r.RealizedGain),
+		ratFloatPtr(r.UnrealizedGain), ratFloatPtr(r.LatestMarketPrice),
+		r.FirstBuyDate, r.DaysHeld,
+		ratFloatPtr(r.ROI), ratFloatPtr(r.AnnualizedROI),
 	})
 }
 
