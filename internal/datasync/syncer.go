@@ -40,9 +40,11 @@ func New(bq *bigquery.Client, gcs *storage.Client, driveSvc *drive.Service, proj
 
 // Trigger fires SyncAll in the background. Safe to call from HTTP handlers.
 func (s *Syncer) Trigger() {
+	log.Printf("datasync: trigger called")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
+		log.Printf("datasync: starting sync")
 		if err := s.SyncAll(ctx); err != nil {
 			log.Printf("datasync: sync failed: %v", err)
 		} else {
@@ -91,12 +93,18 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("marshal %s: %w", f.name, err)
 		}
+		log.Printf("datasync: uploading %s to GCS (%d bytes)", f.name, len(b))
 		if err := s.uploadGCS(ctx, f.name, b); err != nil {
+			log.Printf("datasync: GCS upload failed for %s: %v", f.name, err)
 			return fmt.Errorf("gcs upload %s: %w", f.name, err)
 		}
+		log.Printf("datasync: GCS upload OK for %s", f.name)
+		log.Printf("datasync: upserting %s to Drive", f.name)
 		if err := s.upsertDrive(ctx, f.name, b); err != nil {
+			log.Printf("datasync: Drive upsert failed for %s: %v", f.name, err)
 			return fmt.Errorf("drive upsert %s: %w", f.name, err)
 		}
+		log.Printf("datasync: Drive upsert OK for %s", f.name)
 	}
 	return nil
 }
