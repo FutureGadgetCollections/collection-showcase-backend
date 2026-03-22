@@ -2,12 +2,10 @@
 # Sets up Cloud Run Jobs and Cloud Scheduler for the collection-showcase project.
 #
 # Jobs managed here:
-#   collection-showcase-market-price-update       — Cloud Run Job: fetch prices from TCGPlayer → BQ
-#   collection-showcase-market-price-update-daily — Cloud Scheduler: triggers above job daily at 8 AM ET
-#   collection-showcase-data-sync                 — Cloud Run Job: sync BQ → GCS + GitHub JSON files
-#   collection-showcase-daily-sync                — Cloud Scheduler: triggers above job daily at 2 AM UTC
+#   collection-showcase-data-sync   — Cloud Run Job: sync BQ → GCS + GitHub JSON files
+#   collection-showcase-daily-sync  — Cloud Scheduler: triggers above job daily at 3 AM UTC
 #
-# Usage: bash scripts/setup-price-scheduler.sh
+# Usage: bash scripts/setup-schedulers.sh
 set -euo pipefail
 
 PROJECT=future-gadget-labs-483502
@@ -19,11 +17,12 @@ SCHEDULER_SA="$(gcloud projects describe $PROJECT --format='value(projectNumber)
 
 upsert_run_job() {
   local name=$1; shift
-  if gcloud run jobs describe "$name" --region=$REGION --project=$PROJECT &>/dev/null; then
-    gcloud run jobs update "$name" --region=$REGION --project=$PROJECT "$@"
+  # MSYS_NO_PATHCONV prevents Git Bash on Windows from converting /command paths to Windows paths.
+  if MSYS_NO_PATHCONV=1 gcloud run jobs describe "$name" --region=$REGION --project=$PROJECT &>/dev/null; then
+    MSYS_NO_PATHCONV=1 gcloud run jobs update "$name" --region=$REGION --project=$PROJECT "$@"
     echo "Updated Cloud Run Job: $name"
   else
-    gcloud run jobs create "$name" --region=$REGION --project=$PROJECT "$@"
+    MSYS_NO_PATHCONV=1 gcloud run jobs create "$name" --region=$REGION --project=$PROJECT "$@"
     echo "Created Cloud Run Job: $name"
   fi
 }
@@ -53,29 +52,6 @@ job_uri() {
   echo "https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT}/jobs/${1}:run"
 }
 
-# ── Market price update ────────────────────────────────────────────────────────
-echo "--- collection-showcase-market-price-update ---"
-upsert_run_job collection-showcase-market-price-update \
-  --image=$IMAGE \
-  --command="/fetchprices" \
-  --task-timeout=30m \
-  --max-retries=0 \
-  --memory=2Gi \
-  --labels=$LABEL \
-  --set-env-vars="BQ_PROJECT=${PROJECT},BQ_INVENTORY_DATASET=inventory,BQ_MARKET_DATASET=market_data"
-
-grant_invoker collection-showcase-market-price-update
-
-upsert_scheduler collection-showcase-market-price-update-daily \
-  --schedule="0 8 * * *" \
-  --time-zone="America/New_York" \
-  --uri="$(job_uri collection-showcase-market-price-update)" \
-  --message-body="" \
-  --oauth-service-account-email="${SCHEDULER_SA}" \
-  --http-method=POST \
-  --attempt-deadline=30m \
-  --description="collection-showcase: daily TCGPlayer price fetch for all tracked products"
-
 # ── Data sync ──────────────────────────────────────────────────────────────────
 echo "--- collection-showcase-data-sync ---"
 
@@ -99,7 +75,7 @@ upsert_run_job collection-showcase-data-sync \
   --command="/syncdata" \
   --task-timeout=10m \
   --max-retries=0 \
-  --memory=512Mi \
+  --cpu=1 --memory=512Mi \
   --labels=$LABEL \
   --set-env-vars="BQ_PROJECT=${PROJECT},BQ_INVENTORY_DATASET=inventory,BQ_MARKET_DATASET=market_data,GCS_DATA_BUCKET=collection-showcase-data,GITHUB_OWNER=FutureGadgetCollections,GITHUB_REPO=collection-showcase-data,GITHUB_TOKEN=${GITHUB_TOKEN}"
 
@@ -117,6 +93,5 @@ upsert_scheduler collection-showcase-daily-sync \
 
 echo ""
 echo "Done."
-echo "Manual triggers:"
-echo "  gcloud run jobs execute collection-showcase-market-price-update --region=$REGION --project=$PROJECT"
+echo "Manual trigger:"
 echo "  gcloud run jobs execute collection-showcase-data-sync --region=$REGION --project=$PROJECT"

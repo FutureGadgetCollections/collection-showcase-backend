@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const version = "1.0.7"
+const version = "1.0.8"
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
@@ -127,10 +127,6 @@ func main() {
 	router.GET("/price-history", prh.List)
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
-
-	pfh := handlers.NewPriceFetchHandler(bqClient, inventoryDataset, marketDataset)
-	router.POST("/price-history/fetch", requireAuth, pfh.Fetch)
-	router.POST("/price-history/fetch/scheduled", middleware.RequireSyncSecret(syncSecret), pfh.Fetch)
 
 	syncHandler := func(c *gin.Context) {
 		syncer.Trigger()
