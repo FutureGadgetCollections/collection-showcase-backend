@@ -303,7 +303,7 @@ type collectionRow struct {
 	LatestMarketPrice *big.Rat   `json:"-" bigquery:"latest_market_price"`
 	FirstBuyDate      civil.Date `json:"first_buy_date" bigquery:"first_buy_date"`
 	DaysHeld          int64      `json:"days_held" bigquery:"days_held"`
-	ROI               bigquery.NullFloat64 `json:"-" bigquery:"roi"`
+	ROI               *big.Rat             `json:"-" bigquery:"roi"`
 	AnnualizedROI     bigquery.NullFloat64 `json:"-" bigquery:"annualized_roi"`
 }
 
@@ -325,7 +325,7 @@ func (r collectionRow) MarshalJSON() ([]byte, error) {
 		ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested), ratFloat(r.RealizedGain),
 		ratFloatPtr(r.UnrealizedGain), ratFloatPtr(r.LatestMarketPrice),
 		r.FirstBuyDate, r.DaysHeld,
-		nullFloat(r.ROI), nullFloat(r.AnnualizedROI),
+		ratFloatPtr(r.ROI), nullFloat(r.AnnualizedROI),
 	})
 }
 
