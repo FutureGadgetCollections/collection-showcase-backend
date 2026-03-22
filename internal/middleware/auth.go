@@ -8,19 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RequireSyncSecret allows requests that carry the correct X-Sync-Token header.
-// Used by Cloud Scheduler so it can hit POST /sync without a Firebase token.
-// If secret is empty the middleware always rejects (fail-safe).
-func RequireSyncSecret(secret string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if secret == "" || c.GetHeader("X-Sync-Token") != secret {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid sync token"})
-			return
-		}
-		c.Next()
-	}
-}
-
 // RequireAuth verifies a Firebase ID token and checks the caller's email
 // against the allowlist. Attach to any route group that should be write-only.
 func RequireAuth(authClient *auth.Client, allowedEmails []string) gin.HandlerFunc {

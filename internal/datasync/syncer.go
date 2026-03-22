@@ -235,6 +235,13 @@ func ratFloat(r *big.Rat) float64 {
 	return f
 }
 
+func nullFloat(n bigquery.NullFloat64) *float64 {
+	if !n.Valid {
+		return nil
+	}
+	return &n.Float64
+}
+
 func ratFloatPtr(r *big.Rat) *float64 {
 	if r == nil {
 		return nil
@@ -296,8 +303,8 @@ type collectionRow struct {
 	LatestMarketPrice *big.Rat   `json:"-" bigquery:"latest_market_price"`
 	FirstBuyDate      civil.Date `json:"first_buy_date" bigquery:"first_buy_date"`
 	DaysHeld          int64      `json:"days_held" bigquery:"days_held"`
-	ROI               *big.Rat   `json:"-" bigquery:"roi"`
-	AnnualizedROI     *big.Rat   `json:"-" bigquery:"annualized_roi"`
+	ROI               bigquery.NullFloat64 `json:"-" bigquery:"roi"`
+	AnnualizedROI     bigquery.NullFloat64 `json:"-" bigquery:"annualized_roi"`
 }
 
 func (r collectionRow) MarshalJSON() ([]byte, error) {
@@ -318,7 +325,7 @@ func (r collectionRow) MarshalJSON() ([]byte, error) {
 		ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested), ratFloat(r.RealizedGain),
 		ratFloatPtr(r.UnrealizedGain), ratFloatPtr(r.LatestMarketPrice),
 		r.FirstBuyDate, r.DaysHeld,
-		ratFloatPtr(r.ROI), ratFloatPtr(r.AnnualizedROI),
+		nullFloat(r.ROI), nullFloat(r.AnnualizedROI),
 	})
 }
 
