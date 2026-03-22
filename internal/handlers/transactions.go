@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -51,6 +52,25 @@ type UpdateTransactionRequest struct {
 	TransactionType string  `json:"transaction_type,omitempty"`
 	Platform        string  `json:"platform,omitempty"`
 	Notes           string  `json:"notes,omitempty"`
+}
+
+type BulkCreateTransactionsRequest struct {
+	Transactions []CreateTransactionRequest `json:"transactions" binding:"required,min=1"`
+}
+
+type BulkUpdateTransactionItem struct {
+	TransactionID   string  `json:"transaction_id" binding:"required"`
+	ProductID       string  `json:"product_id,omitempty"`
+	TransactionDate string  `json:"transaction_date,omitempty"`
+	Price           float64 `json:"price,omitempty"`
+	Quantity        int64   `json:"quantity,omitempty"`
+	TransactionType string  `json:"transaction_type,omitempty"`
+	Platform        string  `json:"platform,omitempty"`
+	Notes           string  `json:"notes,omitempty"`
+}
+
+type BulkUpdateTransactionsRequest struct {
+	Transactions []BulkUpdateTransactionItem `json:"transactions" binding:"required,min=1"`
 }
 
 func (h *TransactionHandler) List(c *gin.Context) {
@@ -273,6 +293,161 @@ func (h *TransactionHandler) Delete(c *gin.Context) {
 	if _, err := job.Wait(c.Request.Context()); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	c.Status(204)
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
+}
+
+func (h *TransactionHandler) BulkCreate(c *gin.Context) {
+	var req BulkCreateTransactionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	for i, item := range req.Transactions {
+		if item.TransactionType != "buy" && item.TransactionType != "sell" {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: transaction_type must be 'buy' or 'sell'", i)})
+			return
+		}
+		if item.Price <= 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: price must be greater than 0", i)})
+			return
+		}
+		if item.Quantity <= 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: quantity must be greater than 0", i)})
+			return
+		}
+	}
+
+	ids := make([]string, len(req.Transactions))
+	createdAt := time.Now().UTC()
+	valueRows := make([]string, len(req.Transactions))
+	params := []bigquery.QueryParameter{}
+
+	for i, item := range req.Transactions {
+		ids[i] = uuid.New().String()
+		s := fmt.Sprintf("_%d", i)
+		valueRows[i] = fmt.Sprintf(
+			"(@transaction_id%s, @product_id%s, @transaction_date%s, @price%s, @quantity%s, @transaction_type%s, @platform%s, @notes%s, @created_at%s)",
+			s, s, s, s, s, s, s, s, s,
+		)
+		params = append(params,
+			bigquery.QueryParameter{Name: "transaction_id" + s, Value: ids[i]},
+			bigquery.QueryParameter{Name: "product_id" + s, Value: item.ProductID},
+			bigquery.QueryParameter{Name: "transaction_date" + s, Value: item.TransactionDate},
+			bigquery.QueryParameter{Name: "price" + s, Value: new(big.Rat).SetFloat64(item.Price)},
+			bigquery.QueryParameter{Name: "quantity" + s, Value: item.Quantity},
+			bigquery.QueryParameter{Name: "transaction_type" + s, Value: item.TransactionType},
+			bigquery.QueryParameter{Name: "platform" + s, Value: item.Platform},
+			bigquery.QueryParameter{Name: "notes" + s, Value: item.Notes},
+			bigquery.QueryParameter{Name: "created_at" + s, Value: createdAt},
+		)
+	}
+
+	sql := fmt.Sprintf(
+		`INSERT INTO `+"`%s.%s.transactions`"+`
+		(transaction_id, product_id, transaction_date, price, quantity, transaction_type, platform, notes, created_at)
+		VALUES %s`,
+		h.client.Project(), h.dataset, strings.Join(valueRows, ", "),
+	)
+	q := h.client.Query(sql)
+	q.Parameters = params
+
+	job, err := q.Run(c.Request.Context())
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := job.Wait(c.Request.Context()); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(201, gin.H{"transaction_ids": ids})
+	if h.triggerSync != nil {
+		h.triggerSync()
+	}
+}
+
+func (h *TransactionHandler) BulkUpdate(c *gin.Context) {
+	var req BulkUpdateTransactionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	for i, item := range req.Transactions {
+		if item.TransactionType != "" && item.TransactionType != "buy" && item.TransactionType != "sell" {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: transaction_type must be 'buy' or 'sell'", i)})
+			return
+		}
+		if item.Price < 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: price must be greater than 0", i)})
+			return
+		}
+		if item.Quantity < 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: quantity must be greater than 0", i)})
+			return
+		}
+		if item.ProductID == "" && item.TransactionDate == "" && item.Price == 0 && item.Quantity == 0 && item.TransactionType == "" && item.Platform == "" && item.Notes == "" {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: no fields to update", i)})
+			return
+		}
+	}
+
+	ctx := c.Request.Context()
+	for _, item := range req.Transactions {
+		setClauses := []string{}
+		params := []bigquery.QueryParameter{}
+
+		if item.ProductID != "" {
+			setClauses = append(setClauses, "product_id = @product_id_val")
+			params = append(params, bigquery.QueryParameter{Name: "product_id_val", Value: item.ProductID})
+		}
+		if item.TransactionDate != "" {
+			setClauses = append(setClauses, "transaction_date = @transaction_date")
+			params = append(params, bigquery.QueryParameter{Name: "transaction_date", Value: item.TransactionDate})
+		}
+		if item.Price != 0 {
+			setClauses = append(setClauses, "price = @price")
+			params = append(params, bigquery.QueryParameter{Name: "price", Value: new(big.Rat).SetFloat64(item.Price)})
+		}
+		if item.Quantity != 0 {
+			setClauses = append(setClauses, "quantity = @quantity")
+			params = append(params, bigquery.QueryParameter{Name: "quantity", Value: item.Quantity})
+		}
+		if item.TransactionType != "" {
+			setClauses = append(setClauses, "transaction_type = @transaction_type")
+			params = append(params, bigquery.QueryParameter{Name: "transaction_type", Value: item.TransactionType})
+		}
+		if item.Platform != "" {
+			setClauses = append(setClauses, "platform = @platform")
+			params = append(params, bigquery.QueryParameter{Name: "platform", Value: item.Platform})
+		}
+		if item.Notes != "" {
+			setClauses = append(setClauses, "notes = @notes")
+			params = append(params, bigquery.QueryParameter{Name: "notes", Value: item.Notes})
+		}
+
+		params = append(params, bigquery.QueryParameter{Name: "transaction_id", Value: item.TransactionID})
+		sql := fmt.Sprintf("UPDATE `%s.%s.transactions` SET %s WHERE transaction_id = @transaction_id",
+			h.client.Project(), h.dataset, strings.Join(setClauses, ", "))
+		q := h.client.Query(sql)
+		q.Parameters = params
+
+		job, err := q.Run(ctx)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := job.Wait(ctx); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	c.Status(204)

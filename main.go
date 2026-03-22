@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const version = "1.0.10"
+const version = "1.0.11"
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
@@ -72,7 +72,7 @@ func main() {
 
 	router.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -108,14 +108,18 @@ func main() {
 	router.GET("/products", ph.List)
 	router.GET("/products/:id", ph.Get)
 	router.POST("/products", requireAuth, ph.Create)
+	router.POST("/products/bulk", requireAuth, ph.BulkCreate)
 	router.PUT("/products/:id", requireAuth, ph.Update)
+	router.PATCH("/products/bulk", requireAuth, ph.BulkUpdate)
 	router.DELETE("/products/:id", requireAuth, ph.Delete)
 
 	th := handlers.NewTransactionHandler(bqClient, inventoryDataset, nil)
 	router.GET("/transactions", th.List)
 	router.GET("/transactions/:id", th.Get)
 	router.POST("/transactions", requireAuth, th.Create)
+	router.POST("/transactions/bulk", requireAuth, th.BulkCreate)
 	router.PUT("/transactions/:id", requireAuth, th.Update)
+	router.PATCH("/transactions/bulk", requireAuth, th.BulkUpdate)
 	router.DELETE("/transactions/:id", requireAuth, th.Delete)
 
 	ch := handlers.NewCollectionHandler(bqClient, inventoryDataset)
