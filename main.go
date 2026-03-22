@@ -68,6 +68,14 @@ func main() {
 		log.Fatalf("failed to init firebase auth: %v", err)
 	}
 
+	// Warn at startup if sync env vars are missing — makes misconfiguration visible in Cloud Run logs.
+	if ghToken == "" {
+		log.Printf("WARNING: GITHUB_TOKEN is not set — GitHub data repo will not be updated on sync")
+	}
+	if ghOwner == "" || ghRepo == "" {
+		log.Printf("WARNING: GITHUB_OWNER or GITHUB_REPO is not set — GitHub sync disabled")
+	}
+
 	router := gin.Default()
 
 	router.Use(func(c *gin.Context) {
@@ -131,6 +139,9 @@ func main() {
 	router.POST("/price-history", requireAuth, prh.Create)
 	router.DELETE("/price-history/:record_id", requireAuth, prh.Delete)
 
+	router.GET("/sync/status", func(c *gin.Context) {
+		c.JSON(200, syncer.Status())
+	})
 	router.POST("/sync", requireAuth, func(c *gin.Context) {
 		syncer.Trigger()
 		c.JSON(202, gin.H{"status": "sync started"})

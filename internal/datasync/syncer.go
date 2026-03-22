@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"math/big"
@@ -18,6 +19,13 @@ import (
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
+
+// Status holds the result of the most recent sync attempt.
+type Status struct {
+	LastSyncAt  *time.Time `json:"last_sync_at"`
+	LastSyncErr *string    `json:"last_sync_error"`
+	InProgress  bool       `json:"in_progress"`
+}
 
 type Syncer struct {
 	bq          *bigquery.Client
@@ -29,6 +37,11 @@ type Syncer struct {
 	ghToken     string
 	ghOwner     string
 	ghRepo      string
+
+	mu          sync.Mutex
+	lastSyncAt  *time.Time
+	lastSyncErr *string
+	inProgress  bool
 }
 
 func New(bq *bigquery.Client, gcs *storage.Client, project, inventoryDS, marketDS, gcsBucket, ghToken, ghOwner, ghRepo string) *Syncer {
@@ -45,18 +58,43 @@ func New(bq *bigquery.Client, gcs *storage.Client, project, inventoryDS, marketD
 	}
 }
 
+// Status returns the result of the most recent sync attempt.
+func (s *Syncer) Status() Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Status{
+		LastSyncAt:  s.lastSyncAt,
+		LastSyncErr: s.lastSyncErr,
+		InProgress:  s.inProgress,
+	}
+}
+
 // Trigger fires SyncAll in the background. Safe to call from HTTP handlers.
 func (s *Syncer) Trigger() {
 	log.Printf("datasync: trigger called")
+	s.mu.Lock()
+	s.inProgress = true
+	s.mu.Unlock()
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		log.Printf("datasync: starting sync")
-		if err := s.SyncAll(ctx); err != nil {
+		err := s.SyncAll(ctx)
+
+		now := time.Now().UTC()
+		s.mu.Lock()
+		s.lastSyncAt = &now
+		s.inProgress = false
+		if err != nil {
+			msg := err.Error()
+			s.lastSyncErr = &msg
 			log.Printf("datasync: sync failed: %v", err)
 		} else {
+			s.lastSyncErr = nil
 			log.Printf("datasync: sync complete")
 		}
+		s.mu.Unlock()
 	}()
 }
 
