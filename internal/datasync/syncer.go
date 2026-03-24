@@ -100,13 +100,13 @@ func (s *Syncer) Trigger() {
 
 func (s *Syncer) SyncAll(ctx context.Context) error {
 	products, err := queryAll[productRow](ctx, s.bq,
-		fmt.Sprintf("SELECT * FROM `%s.%s.products` ORDER BY created_at", s.project, s.inventoryDS))
+		fmt.Sprintf("SELECT * FROM `%s.%s.products` ORDER BY product_id", s.project, s.inventoryDS))
 	if err != nil {
 		return fmt.Errorf("query products: %w", err)
 	}
 
 	transactions, err := queryAll[transactionRow](ctx, s.bq,
-		fmt.Sprintf("SELECT * FROM `%s.%s.transactions` ORDER BY transaction_date, created_at", s.project, s.inventoryDS))
+		fmt.Sprintf("SELECT * FROM `%s.%s.transactions` ORDER BY transaction_date, transaction_id", s.project, s.inventoryDS))
 	if err != nil {
 		return fmt.Errorf("query transactions: %w", err)
 	}
@@ -118,7 +118,7 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 	}
 
 	priceHistory, err := queryAll[priceHistoryRow](ctx, s.bq,
-		fmt.Sprintf("SELECT * FROM `%s.%s.price_history` ORDER BY snapshot_date, created_at", s.project, s.marketDS))
+		fmt.Sprintf("SELECT * FROM `%s.%s.price_history` ORDER BY snapshot_date, record_id", s.project, s.marketDS))
 	if err != nil {
 		return fmt.Errorf("query price_history: %w", err)
 	}
