@@ -101,7 +101,15 @@ func main() {
 	transactionsTable := inventoryDataset.Table("transactions")
 	if err := transactionsTable.Create(ctx, &bigquery.TableMetadata{Schema: transactionsSchema}); err != nil {
 		if isAlreadyExists(err) {
-			fmt.Println("table inventory.transactions already exists")
+			fmt.Println("table inventory.transactions already exists, updating schema")
+			meta, err := transactionsTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get transactions table metadata: %v", err)
+			}
+			if _, err := transactionsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: transactionsSchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update transactions table schema: %v", err)
+			}
+			fmt.Println("updated schema: inventory.transactions")
 		} else {
 			log.Fatalf("failed to create transactions table: %v", err)
 		}
@@ -124,7 +132,15 @@ func main() {
 	priceHistoryTable := marketDataset.Table("price_history")
 	if err := priceHistoryTable.Create(ctx, &bigquery.TableMetadata{Schema: priceHistorySchema}); err != nil {
 		if isAlreadyExists(err) {
-			fmt.Println("table market_data.price_history already exists")
+			fmt.Println("table market_data.price_history already exists, updating schema")
+			meta, err := priceHistoryTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get price_history table metadata: %v", err)
+			}
+			if _, err := priceHistoryTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: priceHistorySchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update price_history table schema: %v", err)
+			}
+			fmt.Println("updated schema: market_data.price_history")
 		} else {
 			log.Fatalf("failed to create price_history table: %v", err)
 		}
