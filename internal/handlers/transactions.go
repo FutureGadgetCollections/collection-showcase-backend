@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +25,7 @@ type Transaction struct {
 	TransactionID   string    `json:"transaction_id" bigquery:"transaction_id"`
 	ProductID       string    `json:"product_id" bigquery:"product_id"`
 	TransactionDate string    `json:"transaction_date" bigquery:"transaction_date"`
-	Price           float64   `json:"price" bigquery:"price"`
+	UnitPrice       float64   `json:"unit_price" bigquery:"unit_price"`
 	Quantity        int64     `json:"quantity" bigquery:"quantity"`
 	TransactionType string    `json:"transaction_type" bigquery:"transaction_type"`
 	Platform        string    `json:"platform" bigquery:"platform"`
@@ -37,7 +36,7 @@ type Transaction struct {
 type CreateTransactionRequest struct {
 	ProductID       string  `json:"product_id" binding:"required"`
 	TransactionDate string  `json:"transaction_date" binding:"required"`
-	Price           float64 `json:"price" binding:"required"`
+	UnitPrice       float64 `json:"unit_price" binding:"required"`
 	Quantity        int64   `json:"quantity" binding:"required"`
 	TransactionType string  `json:"transaction_type" binding:"required"`
 	Platform        string  `json:"platform"`
@@ -47,7 +46,7 @@ type CreateTransactionRequest struct {
 type UpdateTransactionRequest struct {
 	ProductID       string  `json:"product_id,omitempty"`
 	TransactionDate string  `json:"transaction_date,omitempty"`
-	Price           float64 `json:"price,omitempty"`
+	UnitPrice       float64 `json:"unit_price,omitempty"`
 	Quantity        int64   `json:"quantity,omitempty"`
 	TransactionType string  `json:"transaction_type,omitempty"`
 	Platform        string  `json:"platform,omitempty"`
@@ -62,7 +61,7 @@ type BulkUpdateTransactionItem struct {
 	TransactionID   string  `json:"transaction_id" binding:"required"`
 	ProductID       string  `json:"product_id,omitempty"`
 	TransactionDate string  `json:"transaction_date,omitempty"`
-	Price           float64 `json:"price,omitempty"`
+	UnitPrice       float64 `json:"unit_price,omitempty"`
 	Quantity        int64   `json:"quantity,omitempty"`
 	TransactionType string  `json:"transaction_type,omitempty"`
 	Platform        string  `json:"platform,omitempty"`
@@ -143,8 +142,8 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "transaction_type must be 'buy' or 'sell'"})
 		return
 	}
-	if req.Price <= 0 {
-		c.JSON(400, gin.H{"error": "price must be greater than 0"})
+	if req.UnitPrice <= 0 {
+		c.JSON(400, gin.H{"error": "unit_price must be greater than 0"})
 		return
 	}
 	if req.Quantity <= 0 {
@@ -156,15 +155,15 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	createdAt := time.Now().UTC()
 
 	sql := fmt.Sprintf(`INSERT INTO `+"`%s.%s.transactions`"+`
-		(transaction_id, product_id, transaction_date, price, quantity, transaction_type, platform, notes, created_at)
-		VALUES (@transaction_id, @product_id, @transaction_date, @price, @quantity, @transaction_type, @platform, @notes, @created_at)`,
+		(transaction_id, product_id, transaction_date, unit_price, quantity, transaction_type, platform, notes, created_at)
+		VALUES (@transaction_id, @product_id, @transaction_date, @unit_price, @quantity, @transaction_type, @platform, @notes, @created_at)`,
 		h.client.Project(), h.dataset)
 	q := h.client.Query(sql)
 	q.Parameters = []bigquery.QueryParameter{
 		{Name: "transaction_id", Value: id},
 		{Name: "product_id", Value: req.ProductID},
 		{Name: "transaction_date", Value: req.TransactionDate},
-		{Name: "price", Value: new(big.Rat).SetFloat64(req.Price)},
+		{Name: "unit_price", Value: req.UnitPrice},
 		{Name: "quantity", Value: req.Quantity},
 		{Name: "transaction_type", Value: req.TransactionType},
 		{Name: "platform", Value: req.Platform},
@@ -200,8 +199,8 @@ func (h *TransactionHandler) Update(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "transaction_type must be 'buy' or 'sell'"})
 		return
 	}
-	if req.Price < 0 {
-		c.JSON(400, gin.H{"error": "price must be greater than 0"})
+	if req.UnitPrice < 0 {
+		c.JSON(400, gin.H{"error": "unit_price must be greater than 0"})
 		return
 	}
 	if req.Quantity < 0 {
@@ -220,9 +219,9 @@ func (h *TransactionHandler) Update(c *gin.Context) {
 		setClauses = append(setClauses, "transaction_date = @transaction_date")
 		params = append(params, bigquery.QueryParameter{Name: "transaction_date", Value: req.TransactionDate})
 	}
-	if req.Price != 0 {
-		setClauses = append(setClauses, "price = @price")
-		params = append(params, bigquery.QueryParameter{Name: "price", Value: new(big.Rat).SetFloat64(req.Price)})
+	if req.UnitPrice != 0 {
+		setClauses = append(setClauses, "unit_price = @unit_price")
+		params = append(params, bigquery.QueryParameter{Name: "unit_price", Value: req.UnitPrice})
 	}
 	if req.Quantity != 0 {
 		setClauses = append(setClauses, "quantity = @quantity")
@@ -313,8 +312,8 @@ func (h *TransactionHandler) BulkCreate(c *gin.Context) {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: transaction_type must be 'buy' or 'sell'", i)})
 			return
 		}
-		if item.Price <= 0 {
-			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: price must be greater than 0", i)})
+		if item.UnitPrice <= 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: unit_price must be greater than 0", i)})
 			return
 		}
 		if item.Quantity <= 0 {
@@ -332,14 +331,14 @@ func (h *TransactionHandler) BulkCreate(c *gin.Context) {
 		ids[i] = uuid.New().String()
 		s := fmt.Sprintf("_%d", i)
 		valueRows[i] = fmt.Sprintf(
-			"(@transaction_id%s, @product_id%s, @transaction_date%s, @price%s, @quantity%s, @transaction_type%s, @platform%s, @notes%s, @created_at%s)",
+			"(@transaction_id%s, @product_id%s, @transaction_date%s, @unit_price%s, @quantity%s, @transaction_type%s, @platform%s, @notes%s, @created_at%s)",
 			s, s, s, s, s, s, s, s, s,
 		)
 		params = append(params,
 			bigquery.QueryParameter{Name: "transaction_id" + s, Value: ids[i]},
 			bigquery.QueryParameter{Name: "product_id" + s, Value: item.ProductID},
 			bigquery.QueryParameter{Name: "transaction_date" + s, Value: item.TransactionDate},
-			bigquery.QueryParameter{Name: "price" + s, Value: new(big.Rat).SetFloat64(item.Price)},
+			bigquery.QueryParameter{Name: "unit_price" + s, Value: item.UnitPrice},
 			bigquery.QueryParameter{Name: "quantity" + s, Value: item.Quantity},
 			bigquery.QueryParameter{Name: "transaction_type" + s, Value: item.TransactionType},
 			bigquery.QueryParameter{Name: "platform" + s, Value: item.Platform},
@@ -350,7 +349,7 @@ func (h *TransactionHandler) BulkCreate(c *gin.Context) {
 
 	sql := fmt.Sprintf(
 		`INSERT INTO `+"`%s.%s.transactions`"+`
-		(transaction_id, product_id, transaction_date, price, quantity, transaction_type, platform, notes, created_at)
+		(transaction_id, product_id, transaction_date, unit_price, quantity, transaction_type, platform, notes, created_at)
 		VALUES %s`,
 		h.client.Project(), h.dataset, strings.Join(valueRows, ", "),
 	)
@@ -385,15 +384,15 @@ func (h *TransactionHandler) BulkUpdate(c *gin.Context) {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: transaction_type must be 'buy' or 'sell'", i)})
 			return
 		}
-		if item.Price < 0 {
-			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: price must be greater than 0", i)})
+		if item.UnitPrice < 0 {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: unit_price must be greater than 0", i)})
 			return
 		}
 		if item.Quantity < 0 {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: quantity must be greater than 0", i)})
 			return
 		}
-		if item.ProductID == "" && item.TransactionDate == "" && item.Price == 0 && item.Quantity == 0 && item.TransactionType == "" && item.Platform == "" && item.Notes == "" {
+		if item.ProductID == "" && item.TransactionDate == "" && item.UnitPrice == 0 && item.Quantity == 0 && item.TransactionType == "" && item.Platform == "" && item.Notes == "" {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("transactions[%d]: no fields to update", i)})
 			return
 		}
@@ -412,9 +411,9 @@ func (h *TransactionHandler) BulkUpdate(c *gin.Context) {
 			setClauses = append(setClauses, "transaction_date = @transaction_date")
 			params = append(params, bigquery.QueryParameter{Name: "transaction_date", Value: item.TransactionDate})
 		}
-		if item.Price != 0 {
-			setClauses = append(setClauses, "price = @price")
-			params = append(params, bigquery.QueryParameter{Name: "price", Value: new(big.Rat).SetFloat64(item.Price)})
+		if item.UnitPrice != 0 {
+			setClauses = append(setClauses, "unit_price = @unit_price")
+			params = append(params, bigquery.QueryParameter{Name: "unit_price", Value: item.UnitPrice})
 		}
 		if item.Quantity != 0 {
 			setClauses = append(setClauses, "quantity = @quantity")

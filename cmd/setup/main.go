@@ -91,7 +91,7 @@ func main() {
 		{Name: "transaction_id", Type: bigquery.StringFieldType, Required: true},
 		{Name: "product_id", Type: bigquery.StringFieldType},
 		{Name: "transaction_date", Type: bigquery.DateFieldType},
-		{Name: "price", Type: bigquery.NumericFieldType},
+		{Name: "unit_price", Type: bigquery.FloatFieldType},
 		{Name: "quantity", Type: bigquery.IntegerFieldType},
 		{Name: "transaction_type", Type: bigquery.StringFieldType},
 		{Name: "platform", Type: bigquery.StringFieldType},
@@ -99,23 +99,18 @@ func main() {
 		{Name: "created_at", Type: bigquery.TimestampFieldType},
 	}
 	transactionsTable := inventoryDataset.Table("transactions")
-	if err := transactionsTable.Create(ctx, &bigquery.TableMetadata{Schema: transactionsSchema}); err != nil {
-		if isAlreadyExists(err) {
-			fmt.Println("table inventory.transactions already exists, updating schema")
-			meta, err := transactionsTable.Metadata(ctx)
-			if err != nil {
-				log.Fatalf("failed to get transactions table metadata: %v", err)
-			}
-			if _, err := transactionsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: transactionsSchema}, meta.ETag); err != nil {
-				log.Fatalf("failed to update transactions table schema: %v", err)
-			}
-			fmt.Println("updated schema: inventory.transactions")
-		} else {
-			log.Fatalf("failed to create transactions table: %v", err)
+	// Drop and recreate to support schema changes (e.g. price → unit_price rename).
+	if err := transactionsTable.Delete(ctx); err != nil {
+		if e, ok := err.(*googleapi.Error); !ok || e.Code != 404 {
+			log.Fatalf("failed to drop transactions table: %v", err)
 		}
 	} else {
-		fmt.Println("created table: inventory.transactions")
+		fmt.Println("dropped table: inventory.transactions")
 	}
+	if err := transactionsTable.Create(ctx, &bigquery.TableMetadata{Schema: transactionsSchema}); err != nil {
+		log.Fatalf("failed to create transactions table: %v", err)
+	}
+	fmt.Println("created table: inventory.transactions")
 
 	priceHistorySchema := bigquery.Schema{
 		{Name: "record_id", Type: bigquery.StringFieldType, Required: true},
@@ -153,9 +148,9 @@ WITH tx AS (
   SELECT
     product_id,
     SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END)          AS total_buy_qty,
-    SUM(CASE WHEN transaction_type = 'buy' THEN price * quantity ELSE 0 END)  AS total_buy_value,
+    SUM(CASE WHEN transaction_type = 'buy' THEN unit_price * quantity ELSE 0 END)  AS total_buy_value,
     SUM(CASE WHEN transaction_type = 'sell' THEN quantity ELSE 0 END)         AS total_sell_qty,
-    SUM(CASE WHEN transaction_type = 'sell' THEN price * quantity ELSE 0 END) AS total_sell_value,
+    SUM(CASE WHEN transaction_type = 'sell' THEN unit_price * quantity ELSE 0 END) AS total_sell_value,
     SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END)  AS quantity,
     MIN(CASE WHEN transaction_type = 'buy' THEN transaction_date END)         AS first_buy_date
   FROM `+"`%s.inventory.transactions`"+`

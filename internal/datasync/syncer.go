@@ -305,30 +305,12 @@ type transactionRow struct {
 	TransactionID   string     `json:"transaction_id" bigquery:"transaction_id"`
 	ProductID       string     `json:"product_id" bigquery:"product_id"`
 	TransactionDate civil.Date `json:"transaction_date" bigquery:"transaction_date"`
-	Price           *big.Rat   `json:"-" bigquery:"price"`
+	UnitPrice       float64    `json:"unit_price" bigquery:"unit_price"`
 	Quantity        int64      `json:"quantity" bigquery:"quantity"`
 	TransactionType string     `json:"transaction_type" bigquery:"transaction_type"`
 	Platform        string     `json:"platform" bigquery:"platform"`
 	Notes           string     `json:"notes" bigquery:"notes"`
 	CreatedAt       time.Time  `json:"created_at" bigquery:"created_at"`
-}
-
-func (r transactionRow) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		TransactionID   string     `json:"transaction_id"`
-		ProductID       string     `json:"product_id"`
-		TransactionDate civil.Date `json:"transaction_date"`
-		Price           float64    `json:"price"`
-		Quantity        int64      `json:"quantity"`
-		TransactionType string     `json:"transaction_type"`
-		Platform        string     `json:"platform"`
-		Notes           string     `json:"notes"`
-		CreatedAt       time.Time  `json:"created_at"`
-	}{
-		r.TransactionID, r.ProductID, r.TransactionDate,
-		ratFloat(r.Price),
-		r.Quantity, r.TransactionType, r.Platform, r.Notes, r.CreatedAt,
-	})
 }
 
 type collectionRow struct {
