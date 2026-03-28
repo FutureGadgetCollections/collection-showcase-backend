@@ -21,6 +21,7 @@ func main() {
 	project := getEnv("BQ_PROJECT", "future-gadget-labs-483502")
 	invDataset := getEnv("BQ_INVENTORY_DATASET", "inventory")
 	mktDataset := getEnv("BQ_MARKET_DATASET", "market_data")
+	catDataset := getEnv("BQ_CATALOG_DATASET", "catalog")
 	gcsBucket := getEnv("GCS_DATA_BUCKET", "collection-showcase-data")
 	ghToken := getEnv("GITHUB_TOKEN", "")
 	ghOwner := getEnv("GITHUB_OWNER", "")
@@ -42,7 +43,7 @@ func main() {
 
 	log.Printf("syncdata: starting — project=%s gcs=%s github=%s/%s", project, gcsBucket, ghOwner, ghRepo)
 
-	syncer := datasync.New(bqClient, gcsClient, project, invDataset, mktDataset, gcsBucket, ghToken, ghOwner, ghRepo)
+	syncer := datasync.New(bqClient, gcsClient, project, invDataset, mktDataset, catDataset, gcsBucket, ghToken, ghOwner, ghRepo)
 	if err := syncer.SyncAll(ctx); err != nil {
 		log.Fatalf("syncdata: %v", err)
 	}

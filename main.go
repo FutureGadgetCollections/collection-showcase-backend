@@ -57,7 +57,8 @@ func main() {
 	}
 	defer gcsClient.Close()
 
-	syncer := datasync.New(bqClient, gcsClient, project, inventoryDataset, marketDataset, gcsBucket, ghToken, ghOwner, ghRepo)
+	catalogDataset := getEnv("BQ_CATALOG_DATASET", "catalog")
+	syncer := datasync.New(bqClient, gcsClient, project, inventoryDataset, marketDataset, catalogDataset, gcsBucket, ghToken, ghOwner, ghRepo)
 
 	fbApp, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: firebaseProjectID})
 	if err != nil {
@@ -133,6 +134,24 @@ func main() {
 	ch := handlers.NewCollectionHandler(bqClient, inventoryDataset)
 	router.GET("/collection", ch.List)
 	router.GET("/collection/:product_id", ch.Get)
+
+	bh := handlers.NewBinderHandler(bqClient, inventoryDataset, catalogDataset, syncer.Trigger)
+	router.GET("/binders", bh.List)
+	router.GET("/binders/:id", bh.Get)
+	router.POST("/binders", requireAuth, bh.Create)
+	router.PUT("/binders/:id", requireAuth, bh.Update)
+	router.DELETE("/binders/:id", requireAuth, bh.Delete)
+	router.POST("/binders/:id/pages", requireAuth, bh.AddPage)
+	router.DELETE("/binders/:id/pages/:page", requireAuth, bh.RemoveLastPage)
+	router.PUT("/binders/:id/pages/:page/slots", requireAuth, bh.UpsertPageSlots)
+
+	dh := handlers.NewDisplayHandler(bqClient, inventoryDataset, syncer.Trigger)
+	router.GET("/displays", dh.List)
+	router.GET("/displays/:id", dh.Get)
+	router.POST("/displays", requireAuth, dh.Create)
+	router.PUT("/displays/:id", requireAuth, dh.Update)
+	router.DELETE("/displays/:id", requireAuth, dh.Delete)
+	router.PUT("/displays/:id/items", requireAuth, dh.UpsertItems)
 
 	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset, nil)
 	router.GET("/price-history", prh.List)
