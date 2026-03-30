@@ -67,5 +67,5 @@ jobs:
             --region=us-central1 \
             --project=future-gadget-labs-483502 \
             --image=us-central1-docker.pkg.dev/future-gadget-labs-483502/tcg-collection/collection-showcase:${{ github.sha }} \
-            --update-env-vars="GITHUB_TOKEN=${{ secrets.DATA_SYNC_PAT }}"
+            --update-secrets="GITHUB_TOKEN=github-data-sync-pat:latest"
 
