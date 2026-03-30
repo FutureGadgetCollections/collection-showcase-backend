@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
@@ -19,34 +18,25 @@ func NewCollectionHandler(client *bigquery.Client, dataset string) *CollectionHa
 	return &CollectionHandler{client: client, dataset: dataset}
 }
 
-func ratToFloat(r *big.Rat) float64 {
-	if r == nil {
-		return 0
-	}
-	f, _ := r.Float64()
-	return f
-}
-
-func ratToFloatPtr(r *big.Rat) *float64 {
-	if r == nil {
+func nullFloat(n bigquery.NullFloat64) *float64 {
+	if !n.Valid {
 		return nil
 	}
-	f, _ := r.Float64()
-	return &f
+	return &n.Float64
 }
 
 type CollectionItem struct {
-	ProductID         string     `json:"product_id" bigquery:"product_id"`
-	Quantity          int64      `json:"quantity" bigquery:"quantity"`
-	AvgUnitCost       *big.Rat   `json:"-" bigquery:"avg_unit_cost"`
-	TotalInvested     *big.Rat   `json:"-" bigquery:"total_invested"`
-	RealizedGain      *big.Rat   `json:"-" bigquery:"realized_gain"`
-	UnrealizedGain    *big.Rat   `json:"-" bigquery:"unrealized_gain"`
-	LatestMarketPrice *big.Rat   `json:"-" bigquery:"latest_market_price"`
-	FirstBuyDate      civil.Date `json:"first_buy_date" bigquery:"first_buy_date"`
-	DaysHeld          int64      `json:"days_held" bigquery:"days_held"`
-	ROI               *big.Rat   `json:"-" bigquery:"roi"`
-	AnnualizedROI     *big.Rat   `json:"-" bigquery:"annualized_roi"`
+	ProductID         string               `json:"product_id" bigquery:"product_id"`
+	Quantity          int64                `json:"quantity" bigquery:"quantity"`
+	AvgUnitCost       bigquery.NullFloat64 `json:"-" bigquery:"avg_unit_cost"`
+	TotalInvested     bigquery.NullFloat64 `json:"-" bigquery:"total_invested"`
+	RealizedGain      bigquery.NullFloat64 `json:"-" bigquery:"realized_gain"`
+	UnrealizedGain    bigquery.NullFloat64 `json:"-" bigquery:"unrealized_gain"`
+	LatestMarketPrice bigquery.NullFloat64 `json:"-" bigquery:"latest_market_price"`
+	FirstBuyDate      civil.Date           `json:"first_buy_date" bigquery:"first_buy_date"`
+	DaysHeld          int64                `json:"days_held" bigquery:"days_held"`
+	ROI               bigquery.NullFloat64 `json:"-" bigquery:"roi"`
+	AnnualizedROI     bigquery.NullFloat64 `json:"-" bigquery:"annualized_roi"`
 }
 
 func (item CollectionItem) MarshalJSON() ([]byte, error) {
@@ -64,10 +54,10 @@ func (item CollectionItem) MarshalJSON() ([]byte, error) {
 		AnnualizedROI     *float64   `json:"annualized_roi"`
 	}{
 		item.ProductID, item.Quantity,
-		ratToFloat(item.AvgUnitCost), ratToFloat(item.TotalInvested), ratToFloat(item.RealizedGain),
-		ratToFloatPtr(item.UnrealizedGain), ratToFloatPtr(item.LatestMarketPrice),
+		item.AvgUnitCost.Float64, item.TotalInvested.Float64, item.RealizedGain.Float64,
+		nullFloat(item.UnrealizedGain), nullFloat(item.LatestMarketPrice),
 		item.FirstBuyDate, item.DaysHeld,
-		ratToFloatPtr(item.ROI), ratToFloatPtr(item.AnnualizedROI),
+		nullFloat(item.ROI), nullFloat(item.AnnualizedROI),
 	})
 }
 

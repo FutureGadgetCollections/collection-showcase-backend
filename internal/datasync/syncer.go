@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"math/big"
-
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
 	"cloud.google.com/go/storage"
@@ -274,14 +272,6 @@ func queryAll[T any](ctx context.Context, bq *bigquery.Client, sql string) ([]T,
 
 // BQ row types — mirrors the table schemas for JSON serialization.
 
-func ratFloat(r *big.Rat) float64 {
-	if r == nil {
-		return 0
-	}
-	f, _ := r.Float64()
-	return f
-}
-
 func nullFloat(n bigquery.NullFloat64) *float64 {
 	if !n.Valid {
 		return nil
@@ -289,12 +279,8 @@ func nullFloat(n bigquery.NullFloat64) *float64 {
 	return &n.Float64
 }
 
-func ratFloatPtr(r *big.Rat) *float64 {
-	if r == nil {
-		return nil
-	}
-	f, _ := r.Float64()
-	return &f
+func nullFloatVal(n bigquery.NullFloat64) float64 {
+	return n.Float64
 }
 
 type productRow struct {
@@ -323,16 +309,16 @@ type transactionRow struct {
 }
 
 type collectionRow struct {
-	ProductID         string     `json:"product_id" bigquery:"product_id"`
-	Quantity          int64      `json:"quantity" bigquery:"quantity"`
-	AvgUnitCost       *big.Rat   `json:"-" bigquery:"avg_unit_cost"`
-	TotalInvested     *big.Rat   `json:"-" bigquery:"total_invested"`
-	RealizedGain      *big.Rat   `json:"-" bigquery:"realized_gain"`
-	UnrealizedGain    *big.Rat   `json:"-" bigquery:"unrealized_gain"`
-	LatestMarketPrice *big.Rat   `json:"-" bigquery:"latest_market_price"`
-	FirstBuyDate      civil.Date `json:"first_buy_date" bigquery:"first_buy_date"`
-	DaysHeld          int64      `json:"days_held" bigquery:"days_held"`
-	ROI               *big.Rat             `json:"-" bigquery:"roi"`
+	ProductID         string               `json:"product_id" bigquery:"product_id"`
+	Quantity          int64                `json:"quantity" bigquery:"quantity"`
+	AvgUnitCost       bigquery.NullFloat64 `json:"-" bigquery:"avg_unit_cost"`
+	TotalInvested     bigquery.NullFloat64 `json:"-" bigquery:"total_invested"`
+	RealizedGain      bigquery.NullFloat64 `json:"-" bigquery:"realized_gain"`
+	UnrealizedGain    bigquery.NullFloat64 `json:"-" bigquery:"unrealized_gain"`
+	LatestMarketPrice bigquery.NullFloat64 `json:"-" bigquery:"latest_market_price"`
+	FirstBuyDate      civil.Date           `json:"first_buy_date" bigquery:"first_buy_date"`
+	DaysHeld          int64                `json:"days_held" bigquery:"days_held"`
+	ROI               bigquery.NullFloat64 `json:"-" bigquery:"roi"`
 	AnnualizedROI     bigquery.NullFloat64 `json:"-" bigquery:"annualized_roi"`
 }
 
@@ -351,10 +337,10 @@ func (r collectionRow) MarshalJSON() ([]byte, error) {
 		AnnualizedROI     *float64   `json:"annualized_roi"`
 	}{
 		r.ProductID, r.Quantity,
-		ratFloat(r.AvgUnitCost), ratFloat(r.TotalInvested), ratFloat(r.RealizedGain),
-		ratFloatPtr(r.UnrealizedGain), ratFloatPtr(r.LatestMarketPrice),
+		nullFloatVal(r.AvgUnitCost), nullFloatVal(r.TotalInvested), nullFloatVal(r.RealizedGain),
+		nullFloat(r.UnrealizedGain), nullFloat(r.LatestMarketPrice),
 		r.FirstBuyDate, r.DaysHeld,
-		ratFloatPtr(r.ROI), nullFloat(r.AnnualizedROI),
+		nullFloat(r.ROI), nullFloat(r.AnnualizedROI),
 	})
 }
 
@@ -363,8 +349,8 @@ type priceHistoryRow struct {
 	ProductID          string     `json:"product_id" bigquery:"product_id"`
 	SnapshotDate       civil.Date `json:"snapshot_date" bigquery:"snapshot_date"`
 	Source             string     `json:"source" bigquery:"source"`
-	MarketPrice        *big.Rat   `json:"-" bigquery:"market_price"`
-	MedianPrice        *big.Rat   `json:"-" bigquery:"median_price"`
+	MarketPrice        bigquery.NullFloat64 `json:"-" bigquery:"market_price"`
+	MedianPrice        bigquery.NullFloat64 `json:"-" bigquery:"median_price"`
 	SellThroughRate    float64    `json:"sell_through_rate" bigquery:"sell_through_rate"`
 	DistinctBuyerCount int64      `json:"distinct_buyer_count" bigquery:"distinct_buyer_count"`
 	ListedCount        int64      `json:"listed_count" bigquery:"listed_count"`
@@ -385,7 +371,7 @@ func (r priceHistoryRow) MarshalJSON() ([]byte, error) {
 		CreatedAt          time.Time  `json:"created_at"`
 	}{
 		r.RecordID, r.ProductID, r.SnapshotDate, r.Source,
-		ratFloat(r.MarketPrice), ratFloat(r.MedianPrice),
+		nullFloatVal(r.MarketPrice), nullFloatVal(r.MedianPrice),
 		r.SellThroughRate, r.DistinctBuyerCount, r.ListedCount, r.CreatedAt,
 	})
 }
