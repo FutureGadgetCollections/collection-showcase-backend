@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"cloud.google.com/go/bigquery"
 	"github.com/gin-gonic/gin"
@@ -51,19 +52,23 @@ func (h *ProductHandler) List(c *gin.Context) {
 		}
 	}
 
-	where := ""
+	var clauses []string
 	params := []bigquery.QueryParameter{}
 	if t := c.Query("type"); t != "" {
-		where = " WHERE product_type = @product_type"
+		clauses = append(clauses, "product_type = @product_type")
 		params = append(params, bigquery.QueryParameter{Name: "product_type", Value: t})
 	}
 	if g := c.Query("game"); g != "" {
-		if where == "" {
-			where = " WHERE game = @game"
-		} else {
-			where += " AND game = @game"
-		}
+		clauses = append(clauses, "game = @game")
 		params = append(params, bigquery.QueryParameter{Name: "game", Value: g})
+	}
+	if s := c.Query("set_code"); s != "" {
+		clauses = append(clauses, "set_code = @set_code")
+		params = append(params, bigquery.QueryParameter{Name: "set_code", Value: s})
+	}
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + strings.Join(clauses, " AND ")
 	}
 
 	sql := fmt.Sprintf("SELECT * FROM `%s.%s.catalog_products`%s ORDER BY game, set_code, product_id LIMIT %d OFFSET %d",
