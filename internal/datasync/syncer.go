@@ -129,6 +129,30 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 		return fmt.Errorf("query collection: %w", err)
 	}
 
+	// Enrich collection with display/binder placement data.
+	displayPlacements, err := queryAll[displayPlacementRow](ctx, s.bq,
+		fmt.Sprintf(`SELECT i.product_id, i.display_id, d.name AS display_name, SUM(i.quantity) AS quantity
+		FROM `+"`%s.%s.showcase_display_items`"+` i
+		JOIN `+"`%s.%s.showcase_displays`"+` d ON i.display_id = d.display_id
+		GROUP BY i.product_id, i.display_id, d.name`, s.project, s.inventoryDS, s.project, s.inventoryDS))
+	if err != nil {
+		return fmt.Errorf("query display placements: %w", err)
+	}
+
+	binderPlacements, err := queryAll[binderPlacementRow](ctx, s.bq,
+		fmt.Sprintf(`SELECT
+		  CONCAT('card:', s.card_game, ':', s.card_set_code, ':', s.card_number) AS product_id,
+		  s.binder_id, b.name AS binder_name, COUNT(*) AS card_count
+		FROM `+"`%s.%s.binder_slots`"+` s
+		JOIN `+"`%s.%s.binders`"+` b ON s.binder_id = b.binder_id
+		WHERE s.card_game != '' AND s.card_set_code != '' AND s.card_number != ''
+		GROUP BY product_id, s.binder_id, b.name`, s.project, s.inventoryDS, s.project, s.inventoryDS))
+	if err != nil {
+		return fmt.Errorf("query binder placements: %w", err)
+	}
+
+	enrichCollectionLocations(collection, displayPlacements, binderPlacements)
+
 	priceHistory, err := queryAll[priceHistoryRow](ctx, s.bq,
 		fmt.Sprintf("SELECT * FROM `%s.%s.price_history` ORDER BY snapshot_date, record_id", s.project, s.marketDS))
 	if err != nil {
@@ -332,28 +356,93 @@ type collectionRow struct {
 	DaysHeld          int64                `json:"days_held" bigquery:"days_held"`
 	ROI               bigquery.NullFloat64 `json:"-" bigquery:"roi"`
 	AnnualizedROI     bigquery.NullFloat64 `json:"-" bigquery:"annualized_roi"`
+
+	// Enriched at sync time — not from BQ.
+	Locations []collectionLocation `json:"-"`
+}
+
+type collectionLocation struct {
+	Type     string `json:"type"`               // "display", "binder", or "unorganized"
+	Name     string `json:"name,omitempty"`      // display/binder name
+	ID       string `json:"id,omitempty"`        // display_id or binder_id
+	Quantity int64  `json:"quantity"`
 }
 
 func (r collectionRow) MarshalJSON() ([]byte, error) {
+	locs := r.Locations
+	if locs == nil {
+		locs = []collectionLocation{}
+	}
 	return json.Marshal(struct {
-		ProductID         string     `json:"product_id"`
-		Quantity          int64      `json:"quantity"`
-		AvgUnitCost       float64    `json:"avg_unit_cost"`
-		TotalInvested     float64    `json:"total_invested"`
-		RealizedGain      float64    `json:"realized_gain"`
-		UnrealizedGain    *float64   `json:"unrealized_gain"`
-		LatestMarketPrice *float64   `json:"latest_market_price"`
-		FirstBuyDate      civil.Date `json:"first_buy_date"`
-		DaysHeld          int64      `json:"days_held"`
-		ROI               *float64   `json:"roi"`
-		AnnualizedROI     *float64   `json:"annualized_roi"`
+		ProductID         string               `json:"product_id"`
+		Quantity          int64                `json:"quantity"`
+		AvgUnitCost       float64              `json:"avg_unit_cost"`
+		TotalInvested     float64              `json:"total_invested"`
+		RealizedGain      float64              `json:"realized_gain"`
+		UnrealizedGain    *float64             `json:"unrealized_gain"`
+		LatestMarketPrice *float64             `json:"latest_market_price"`
+		FirstBuyDate      civil.Date           `json:"first_buy_date"`
+		DaysHeld          int64                `json:"days_held"`
+		ROI               *float64             `json:"roi"`
+		AnnualizedROI     *float64             `json:"annualized_roi"`
+		Locations         []collectionLocation `json:"locations"`
 	}{
 		r.ProductID, r.Quantity,
 		nullFloatVal(r.AvgUnitCost), nullFloatVal(r.TotalInvested), nullFloatVal(r.RealizedGain),
 		nullFloat(r.UnrealizedGain), nullFloat(r.LatestMarketPrice),
 		r.FirstBuyDate, r.DaysHeld,
 		nullFloat(r.ROI), nullFloat(r.AnnualizedROI),
+		locs,
 	})
+}
+
+// displayPlacementRow aggregates display item quantities per product.
+type displayPlacementRow struct {
+	ProductID   string `bigquery:"product_id"`
+	DisplayID   string `bigquery:"display_id"`
+	DisplayName string `bigquery:"display_name"`
+	Quantity    int64  `bigquery:"quantity"`
+}
+
+// binderPlacementRow aggregates binder slot counts per card product.
+type binderPlacementRow struct {
+	ProductID  string `bigquery:"product_id"`
+	BinderID   string `bigquery:"binder_id"`
+	BinderName string `bigquery:"binder_name"`
+	CardCount  int64  `bigquery:"card_count"`
+}
+
+// enrichCollectionLocations merges display/binder placement data into collection rows.
+func enrichCollectionLocations(collection []collectionRow, displayPlacements []displayPlacementRow, binderPlacements []binderPlacementRow) {
+	// Build maps: product_id → []location
+	locMap := make(map[string][]collectionLocation)
+	placedQty := make(map[string]int64)
+
+	for _, dp := range displayPlacements {
+		locMap[dp.ProductID] = append(locMap[dp.ProductID], collectionLocation{
+			Type: "display", Name: dp.DisplayName, ID: dp.DisplayID, Quantity: dp.Quantity,
+		})
+		placedQty[dp.ProductID] += dp.Quantity
+	}
+	for _, bp := range binderPlacements {
+		locMap[bp.ProductID] = append(locMap[bp.ProductID], collectionLocation{
+			Type: "binder", Name: bp.BinderName, ID: bp.BinderID, Quantity: bp.CardCount,
+		})
+		placedQty[bp.ProductID] += bp.CardCount
+	}
+
+	for i := range collection {
+		pid := collection[i].ProductID
+		locs := locMap[pid]
+		unorganized := collection[i].Quantity - placedQty[pid]
+		if unorganized > 0 {
+			locs = append(locs, collectionLocation{Type: "unorganized", Quantity: unorganized})
+		}
+		if locs == nil {
+			locs = []collectionLocation{{Type: "unorganized", Quantity: collection[i].Quantity}}
+		}
+		collection[i].Locations = locs
+	}
 }
 
 type priceHistoryRow struct {
