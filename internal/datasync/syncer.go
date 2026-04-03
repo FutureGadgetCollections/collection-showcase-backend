@@ -112,8 +112,7 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 		  COALESCE(cp.image_url, '') AS image_url,
 		  CURRENT_TIMESTAMP() AS created_at
 		FROM `+"`%s.%s.catalog_products`"+` cp
-		WHERE cp.product_type = 'sealed'
-		ORDER BY cp.game, cp.set_code, cp.product_id`, s.project, s.inventoryDS))
+		ORDER BY cp.product_type, cp.game, cp.set_code, cp.product_id`, s.project, s.inventoryDS))
 	if err != nil {
 		return fmt.Errorf("query products: %w", err)
 	}
