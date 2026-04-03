@@ -56,36 +56,9 @@ func main() {
 		fmt.Println("created dataset: market_data")
 	}
 
-	productsSchema := bigquery.Schema{
-		{Name: "product_id", Type: bigquery.StringFieldType, Required: true},
-		{Name: "name", Type: bigquery.StringFieldType},
-		{Name: "game_category", Type: bigquery.StringFieldType},
-		{Name: "game_subcategory", Type: bigquery.StringFieldType},
-		{Name: "product_category", Type: bigquery.StringFieldType},
-		{Name: "tcgplayer_id", Type: bigquery.StringFieldType},
-		{Name: "pricecharting_url", Type: bigquery.StringFieldType},
-		{Name: "listing_url", Type: bigquery.StringFieldType},
-		{Name: "image_url", Type: bigquery.StringFieldType},
-		{Name: "created_at", Type: bigquery.TimestampFieldType},
-	}
-	productsTable := inventoryDataset.Table("products")
-	if err := productsTable.Create(ctx, &bigquery.TableMetadata{Schema: productsSchema}); err != nil {
-		if isAlreadyExists(err) {
-			fmt.Println("table inventory.products already exists, updating schema")
-			meta, err := productsTable.Metadata(ctx)
-			if err != nil {
-				log.Fatalf("failed to get products table metadata: %v", err)
-			}
-			if _, err := productsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: productsSchema}, meta.ETag); err != nil {
-				log.Fatalf("failed to update products table schema: %v", err)
-			}
-			fmt.Println("updated schema: inventory.products")
-		} else {
-			log.Fatalf("failed to create products table: %v", err)
-		}
-	} else {
-		fmt.Println("created table: inventory.products")
-	}
+	// NOTE: inventory.products table is deprecated. Products now come from
+	// inventory.catalog_products view (backed by catalog.sealed_products in
+	// the market tracker). The old table still exists in BQ but is unused.
 
 	transactionsSchema := bigquery.Schema{
 		{Name: "transaction_id", Type: bigquery.StringFieldType, Required: true},
@@ -157,9 +130,10 @@ WITH tx AS (
   GROUP BY product_id
 ),
 latest_price AS (
-  SELECT product_id, market_price AS latest_market_price
-  FROM `+"`%s.market_data.price_history`"+`
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY snapshot_date DESC) = 1
+  SELECT cp.product_id, ph.market_price AS latest_market_price
+  FROM `+"`%s.inventory.catalog_products`"+` cp
+  JOIN `+"`%s.market_data.tcgplayer_price_history`"+` ph ON cp.tcgplayer_id = ph.tcgplayer_id
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY cp.product_id ORDER BY ph.date DESC) = 1
 ),
 base AS (
   SELECT
@@ -194,7 +168,7 @@ SELECT
       POWER(1 + SAFE_DIVIDE(realized_gain + unrealized_gain, total_invested), 365.0 / days_held) - 1
     ELSE NULL
   END                                                                                AS annualized_roi
-FROM base`, project, project, project)
+FROM base`, project, project, project, project)
 
 	q := client.Query(viewSQL)
 	job, err := q.Run(ctx)

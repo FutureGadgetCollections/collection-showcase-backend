@@ -100,7 +100,20 @@ func (s *Syncer) Trigger() {
 
 func (s *Syncer) SyncAll(ctx context.Context) error {
 	products, err := queryAll[productRow](ctx, s.bq,
-		fmt.Sprintf("SELECT * FROM `%s.%s.products` ORDER BY product_id", s.project, s.inventoryDS))
+		fmt.Sprintf(`SELECT
+		  cp.product_id,
+		  cp.name,
+		  cp.game AS game_category,
+		  cp.era AS game_subcategory,
+		  cp.product_subtype AS product_category,
+		  COALESCE(cp.tcgplayer_id, '') AS tcgplayer_id,
+		  COALESCE(cp.pricecharting_url, '') AS pricecharting_url,
+		  '' AS listing_url,
+		  COALESCE(cp.image_url, '') AS image_url,
+		  CURRENT_TIMESTAMP() AS created_at
+		FROM `+"`%s.%s.catalog_products`"+` cp
+		WHERE cp.product_type = 'sealed'
+		ORDER BY cp.game, cp.set_code, cp.product_id`, s.project, s.inventoryDS))
 	if err != nil {
 		return fmt.Errorf("query products: %w", err)
 	}
@@ -627,10 +640,13 @@ func (s *Syncer) SyncDisplays(ctx context.Context) error {
 	for _, d := range displays {
 		itemSQL := fmt.Sprintf(`
 SELECT i.display_id, i.position, i.product_id, i.quantity, i.notes,
-       p.name AS product_name, p.game_category, p.game_subcategory,
-       p.product_category, p.image_url, i.updated_at
+       cp.name AS product_name,
+       cp.game AS game_category,
+       cp.era AS game_subcategory,
+       cp.product_subtype AS product_category,
+       cp.image_url, i.updated_at
 FROM `+"`%s.%s.showcase_display_items`"+` i
-LEFT JOIN `+"`%s.%s.products`"+` p ON i.product_id = p.product_id
+LEFT JOIN `+"`%s.%s.catalog_products`"+` cp ON i.product_id = cp.product_id
 WHERE i.display_id = @display_id
 ORDER BY i.position`,
 			s.project, s.inventoryDS, s.project, s.inventoryDS)

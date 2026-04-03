@@ -116,11 +116,6 @@ func main() {
 	ph := handlers.NewProductHandler(bqClient, inventoryDataset, nil)
 	router.GET("/products", ph.List)
 	router.GET("/products/:id", ph.Get)
-	router.POST("/products", requireAuth, ph.Create)
-	router.POST("/products/bulk", requireAuth, ph.BulkCreate)
-	router.PUT("/products/:id", requireAuth, ph.Update)
-	router.PATCH("/products/bulk", requireAuth, ph.BulkUpdate)
-	router.DELETE("/products/:id", requireAuth, ph.Delete)
 
 	th := handlers.NewTransactionHandler(bqClient, inventoryDataset, nil)
 	router.GET("/transactions", th.List)
