@@ -196,6 +196,9 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 	if err := s.SyncDisplays(ctx); err != nil {
 		return fmt.Errorf("sync displays: %w", err)
 	}
+	if err := s.SyncBoxBreaks(ctx); err != nil {
+		return fmt.Errorf("sync box breaks: %w", err)
+	}
 	return nil
 }
 
@@ -810,6 +813,254 @@ func nullStr(n bigquery.NullString) string {
 		return n.StringVal
 	}
 	return ""
+}
+
+// ── Box break sync row / output types ─────────────────────────────────────────
+
+type boxBreakSyncRow struct {
+	BreakID           string     `bigquery:"break_id"`
+	SealedProductID   string     `bigquery:"sealed_product_id"`
+	BreakDate         civil.Date `bigquery:"break_date"`
+	SealedMarketValue float64    `bigquery:"sealed_market_value"`
+	BinderID          bigquery.NullString `bigquery:"binder_id"`
+	Notes             bigquery.NullString `bigquery:"notes"`
+	CreatedAt         time.Time  `bigquery:"created_at"`
+	// Joined sealed product metadata.
+	SealedName      bigquery.NullString `bigquery:"sealed_name"`
+	SealedImageURL  bigquery.NullString `bigquery:"sealed_image_url"`
+	SealedGame      bigquery.NullString `bigquery:"sealed_game"`
+	SealedEra       bigquery.NullString `bigquery:"sealed_era"`
+	SealedSubtype   bigquery.NullString `bigquery:"sealed_subtype"`
+	// Joined buy-side aggregates for the sealed product.
+	SealedBuyQty   bigquery.NullInt64   `bigquery:"sealed_buy_qty"`
+	SealedAvgCost  bigquery.NullFloat64 `bigquery:"sealed_avg_cost"`
+}
+
+type boxBreakPullSyncRow struct {
+	PullID                    string              `bigquery:"pull_id"`
+	BreakID                   string              `bigquery:"break_id"`
+	PullType                  string              `bigquery:"pull_type"`
+	ProductID                 bigquery.NullString `bigquery:"product_id"`
+	BulkGame                  bigquery.NullString `bigquery:"bulk_game"`
+	BulkSetCode               bigquery.NullString `bigquery:"bulk_set_code"`
+	BulkLabel                 bigquery.NullString `bigquery:"bulk_label"`
+	Quantity                  int64               `bigquery:"quantity"`
+	MarketValuePerUnit        float64             `bigquery:"market_value_per_unit"`
+	AllocatedCostBasisPerUnit float64             `bigquery:"allocated_cost_basis_per_unit"`
+	Notes                     bigquery.NullString `bigquery:"notes"`
+	CreatedAt                 time.Time           `bigquery:"created_at"`
+	// Joined single-card metadata (for "single" pulls).
+	ProductName     bigquery.NullString `bigquery:"product_name"`
+	ProductImageURL bigquery.NullString `bigquery:"product_image_url"`
+	// Joined latest market price for unrealized P&L on singles.
+	LatestMarketPrice bigquery.NullFloat64 `bigquery:"latest_market_price"`
+}
+
+type boxBreakIndexEntry struct {
+	BreakID            string     `json:"break_id"`
+	SealedProductID    string     `json:"sealed_product_id"`
+	SealedName         string     `json:"sealed_name"`
+	SealedImageURL     string     `json:"sealed_image_url"`
+	BreakDate          civil.Date `json:"break_date"`
+	SealedMarketValue  float64    `json:"sealed_market_value"`
+	SealedAvgCost      float64    `json:"sealed_avg_cost"`
+	SealedRealizedGain float64    `json:"sealed_realized_gain"`
+	PullCount          int        `json:"pull_count"`
+	TotalPullValue     float64    `json:"total_pull_market_value"`
+	BinderID           string     `json:"binder_id"`
+}
+
+type boxBreakDetail struct {
+	BreakID            string            `json:"break_id"`
+	SealedProductID    string            `json:"sealed_product_id"`
+	SealedName         string            `json:"sealed_name"`
+	SealedImageURL     string            `json:"sealed_image_url"`
+	SealedGame         string            `json:"sealed_game"`
+	SealedEra          string            `json:"sealed_era"`
+	SealedSubtype      string            `json:"sealed_subtype"`
+	BreakDate          civil.Date        `json:"break_date"`
+	SealedMarketValue  float64           `json:"sealed_market_value"`
+	SealedAvgCost      float64           `json:"sealed_avg_cost"`
+	SealedRealizedGain float64           `json:"sealed_realized_gain"`
+	BinderID           string            `json:"binder_id"`
+	Notes              string            `json:"notes"`
+	CreatedAt          time.Time         `json:"created_at"`
+	Pulls              []boxBreakPullOut `json:"pulls"`
+}
+
+type boxBreakPullOut struct {
+	PullID                    string   `json:"pull_id"`
+	PullType                  string   `json:"pull_type"`
+	ProductID                 string   `json:"product_id"`
+	ProductName               string   `json:"product_name"`
+	ProductImageURL           string   `json:"product_image_url"`
+	BulkGame                  string   `json:"bulk_game"`
+	BulkSetCode               string   `json:"bulk_set_code"`
+	BulkLabel                 string   `json:"bulk_label"`
+	Quantity                  int64    `json:"quantity"`
+	MarketValuePerUnit        float64  `json:"market_value_per_unit"`
+	AllocatedCostBasisPerUnit float64  `json:"allocated_cost_basis_per_unit"`
+	LatestMarketPrice         *float64 `json:"latest_market_price"`
+	Notes                     string   `json:"notes"`
+}
+
+// ── SyncBoxBreaks ─────────────────────────────────────────────────────────────
+
+func (s *Syncer) SyncBoxBreaks(ctx context.Context) error {
+	// One query gives us break metadata enriched with sealed product info and buy-side aggregates.
+	// sealed_avg_cost is the average buy price for the sealed product across all buy transactions
+	// (not including the synthetic sell at break time); sealed_realized_gain is computed client-side.
+	breakSQL := fmt.Sprintf(`
+SELECT
+  b.break_id, b.sealed_product_id, b.break_date, b.sealed_market_value,
+  b.binder_id, b.notes, b.created_at,
+  cp.name AS sealed_name,
+  cp.image_url AS sealed_image_url,
+  cp.game AS sealed_game,
+  cp.era AS sealed_era,
+  cp.product_subtype AS sealed_subtype,
+  agg.total_buy_qty AS sealed_buy_qty,
+  SAFE_DIVIDE(agg.total_buy_value, agg.total_buy_qty) AS sealed_avg_cost
+FROM `+"`%s.%s.box_breaks`"+` b
+LEFT JOIN `+"`%s.%s.catalog_products`"+` cp ON b.sealed_product_id = cp.product_id
+LEFT JOIN (
+  SELECT
+    product_id,
+    SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END) AS total_buy_qty,
+    SUM(CASE WHEN transaction_type = 'buy' THEN unit_price * quantity ELSE 0 END) AS total_buy_value
+  FROM `+"`%s.%s.transactions`"+`
+  GROUP BY product_id
+) agg ON agg.product_id = b.sealed_product_id
+ORDER BY b.break_date DESC, b.created_at DESC`,
+		s.project, s.inventoryDS, s.project, s.inventoryDS, s.project, s.inventoryDS)
+
+	breaks, err := queryAll[boxBreakSyncRow](ctx, s.bq, breakSQL)
+	if err != nil {
+		return fmt.Errorf("query box_breaks: %w", err)
+	}
+
+	index := make([]boxBreakIndexEntry, 0, len(breaks))
+
+	for _, b := range breaks {
+		pulls, err := s.queryBoxBreakPulls(ctx, b.BreakID)
+		if err != nil {
+			return fmt.Errorf("query pulls for break %s: %w", b.BreakID, err)
+		}
+
+		totalPullValue := 0.0
+		for _, p := range pulls {
+			totalPullValue += float64(p.Quantity) * p.MarketValuePerUnit
+		}
+
+		sealedAvgCost := nullFloatVal(b.SealedAvgCost)
+		sealedRealized := b.SealedMarketValue - sealedAvgCost // per-box realized P&L
+
+		detail := boxBreakDetail{
+			BreakID:            b.BreakID,
+			SealedProductID:    b.SealedProductID,
+			SealedName:         nullStr(b.SealedName),
+			SealedImageURL:     nullStr(b.SealedImageURL),
+			SealedGame:         nullStr(b.SealedGame),
+			SealedEra:          nullStr(b.SealedEra),
+			SealedSubtype:      nullStr(b.SealedSubtype),
+			BreakDate:          b.BreakDate,
+			SealedMarketValue:  b.SealedMarketValue,
+			SealedAvgCost:      sealedAvgCost,
+			SealedRealizedGain: sealedRealized,
+			BinderID:           nullStr(b.BinderID),
+			Notes:              nullStr(b.Notes),
+			CreatedAt:          b.CreatedAt,
+			Pulls:              pulls,
+		}
+
+		detailBytes, err := json.Marshal(detail)
+		if err != nil {
+			return fmt.Errorf("marshal box break %s: %w", b.BreakID, err)
+		}
+		detailPath := fmt.Sprintf("box-breaks/%s.json", b.BreakID)
+		if err := s.uploadFile(ctx, detailPath, detailBytes); err != nil {
+			return fmt.Errorf("upload %s: %w", detailPath, err)
+		}
+
+		index = append(index, boxBreakIndexEntry{
+			BreakID:            b.BreakID,
+			SealedProductID:    b.SealedProductID,
+			SealedName:         nullStr(b.SealedName),
+			SealedImageURL:     nullStr(b.SealedImageURL),
+			BreakDate:          b.BreakDate,
+			SealedMarketValue:  b.SealedMarketValue,
+			SealedAvgCost:      sealedAvgCost,
+			SealedRealizedGain: sealedRealized,
+			PullCount:          len(pulls),
+			TotalPullValue:     totalPullValue,
+			BinderID:           nullStr(b.BinderID),
+		})
+	}
+
+	indexBytes, err := json.Marshal(index)
+	if err != nil {
+		return fmt.Errorf("marshal box_breaks index: %w", err)
+	}
+	return s.uploadFile(ctx, "box-breaks/index.json", indexBytes)
+}
+
+func (s *Syncer) queryBoxBreakPulls(ctx context.Context, breakID string) ([]boxBreakPullOut, error) {
+	// Join single-card metadata (via catalog_products) + latest tcgplayer price for unrealized P&L.
+	pullSQL := fmt.Sprintf(`
+SELECT
+  p.pull_id, p.break_id, p.pull_type, p.product_id, p.bulk_game, p.bulk_set_code, p.bulk_label,
+  p.quantity, p.market_value_per_unit, p.allocated_cost_basis_per_unit, p.notes, p.created_at,
+  cp.name AS product_name,
+  cp.image_url AS product_image_url,
+  lp.latest_market_price
+FROM `+"`%s.%s.box_break_pulls`"+` p
+LEFT JOIN `+"`%s.%s.catalog_products`"+` cp ON p.product_id = cp.product_id
+LEFT JOIN (
+  SELECT cp.product_id, ph.market_price AS latest_market_price
+  FROM `+"`%s.%s.catalog_products`"+` cp
+  JOIN `+"`%s.%s.tcgplayer_price_history`"+` ph ON cp.tcgplayer_id = ph.tcgplayer_id
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY cp.product_id ORDER BY ph.date DESC) = 1
+) lp ON lp.product_id = p.product_id
+WHERE p.break_id = @break_id
+ORDER BY p.pull_type, p.market_value_per_unit DESC, p.created_at`,
+		s.project, s.inventoryDS, s.project, s.inventoryDS, s.project, s.inventoryDS, s.project, s.marketDS)
+
+	q := s.bq.Query(pullSQL)
+	q.Parameters = []bigquery.QueryParameter{{Name: "break_id", Value: breakID}}
+	it, err := q.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []boxBreakPullOut
+	for {
+		var row boxBreakPullSyncRow
+		if err := it.Next(&row); err != nil {
+			if err == iterator.Done {
+				break
+			}
+			return nil, err
+		}
+		out = append(out, boxBreakPullOut{
+			PullID:                    row.PullID,
+			PullType:                  row.PullType,
+			ProductID:                 nullStr(row.ProductID),
+			ProductName:               nullStr(row.ProductName),
+			ProductImageURL:           nullStr(row.ProductImageURL),
+			BulkGame:                  nullStr(row.BulkGame),
+			BulkSetCode:               nullStr(row.BulkSetCode),
+			BulkLabel:                 nullStr(row.BulkLabel),
+			Quantity:                  row.Quantity,
+			MarketValuePerUnit:        row.MarketValuePerUnit,
+			AllocatedCostBasisPerUnit: row.AllocatedCostBasisPerUnit,
+			LatestMarketPrice:         nullFloat(row.LatestMarketPrice),
+			Notes:                     nullStr(row.Notes),
+		})
+	}
+	if out == nil {
+		out = []boxBreakPullOut{}
+	}
+	return out, nil
 }
 
 // uploadFile uploads to GCS and optionally to GitHub.

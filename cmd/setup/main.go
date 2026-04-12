@@ -72,18 +72,84 @@ func main() {
 		{Name: "created_at", Type: bigquery.TimestampFieldType},
 	}
 	transactionsTable := inventoryDataset.Table("transactions")
-	// Drop and recreate to support schema changes (e.g. price → unit_price rename).
-	if err := transactionsTable.Delete(ctx); err != nil {
-		if e, ok := err.(*googleapi.Error); !ok || e.Code != 404 {
-			log.Fatalf("failed to drop transactions table: %v", err)
+	if err := transactionsTable.Create(ctx, &bigquery.TableMetadata{Schema: transactionsSchema}); err != nil {
+		if isAlreadyExists(err) {
+			fmt.Println("table inventory.transactions already exists, updating schema")
+			meta, err := transactionsTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get transactions table metadata: %v", err)
+			}
+			if _, err := transactionsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: transactionsSchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update transactions table schema: %v", err)
+			}
+			fmt.Println("updated schema: inventory.transactions")
+		} else {
+			log.Fatalf("failed to create transactions table: %v", err)
 		}
 	} else {
-		fmt.Println("dropped table: inventory.transactions")
+		fmt.Println("created table: inventory.transactions")
 	}
-	if err := transactionsTable.Create(ctx, &bigquery.TableMetadata{Schema: transactionsSchema}); err != nil {
-		log.Fatalf("failed to create transactions table: %v", err)
+
+	boxBreaksSchema := bigquery.Schema{
+		{Name: "break_id", Type: bigquery.StringFieldType, Required: true},
+		{Name: "sealed_product_id", Type: bigquery.StringFieldType, Required: true},
+		{Name: "break_date", Type: bigquery.DateFieldType, Required: true},
+		{Name: "sealed_market_value", Type: bigquery.FloatFieldType, Required: true},
+		{Name: "binder_id", Type: bigquery.StringFieldType},
+		{Name: "notes", Type: bigquery.StringFieldType},
+		{Name: "created_at", Type: bigquery.TimestampFieldType, Required: true},
 	}
-	fmt.Println("created table: inventory.transactions")
+	boxBreaksTable := inventoryDataset.Table("box_breaks")
+	if err := boxBreaksTable.Create(ctx, &bigquery.TableMetadata{Schema: boxBreaksSchema}); err != nil {
+		if isAlreadyExists(err) {
+			fmt.Println("table inventory.box_breaks already exists, updating schema")
+			meta, err := boxBreaksTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get box_breaks table metadata: %v", err)
+			}
+			if _, err := boxBreaksTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: boxBreaksSchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update box_breaks table schema: %v", err)
+			}
+			fmt.Println("updated schema: inventory.box_breaks")
+		} else {
+			log.Fatalf("failed to create box_breaks table: %v", err)
+		}
+	} else {
+		fmt.Println("created table: inventory.box_breaks")
+	}
+
+	boxBreakPullsSchema := bigquery.Schema{
+		{Name: "pull_id", Type: bigquery.StringFieldType, Required: true},
+		{Name: "break_id", Type: bigquery.StringFieldType, Required: true},
+		{Name: "pull_type", Type: bigquery.StringFieldType, Required: true},
+		{Name: "product_id", Type: bigquery.StringFieldType},
+		{Name: "bulk_game", Type: bigquery.StringFieldType},
+		{Name: "bulk_set_code", Type: bigquery.StringFieldType},
+		{Name: "bulk_label", Type: bigquery.StringFieldType},
+		{Name: "quantity", Type: bigquery.IntegerFieldType, Required: true},
+		{Name: "market_value_per_unit", Type: bigquery.FloatFieldType, Required: true},
+		{Name: "allocated_cost_basis_per_unit", Type: bigquery.FloatFieldType, Required: true},
+		{Name: "notes", Type: bigquery.StringFieldType},
+		{Name: "created_at", Type: bigquery.TimestampFieldType, Required: true},
+	}
+	boxBreakPullsTable := inventoryDataset.Table("box_break_pulls")
+	if err := boxBreakPullsTable.Create(ctx, &bigquery.TableMetadata{Schema: boxBreakPullsSchema}); err != nil {
+		if isAlreadyExists(err) {
+			fmt.Println("table inventory.box_break_pulls already exists, updating schema")
+			meta, err := boxBreakPullsTable.Metadata(ctx)
+			if err != nil {
+				log.Fatalf("failed to get box_break_pulls table metadata: %v", err)
+			}
+			if _, err := boxBreakPullsTable.Update(ctx, bigquery.TableMetadataToUpdate{Schema: boxBreakPullsSchema}, meta.ETag); err != nil {
+				log.Fatalf("failed to update box_break_pulls table schema: %v", err)
+			}
+			fmt.Println("updated schema: inventory.box_break_pulls")
+		} else {
+			log.Fatalf("failed to create box_break_pulls table: %v", err)
+		}
+	} else {
+		fmt.Println("created table: inventory.box_break_pulls")
+	}
 
 	priceHistorySchema := bigquery.Schema{
 		{Name: "record_id", Type: bigquery.StringFieldType, Required: true},
@@ -117,7 +183,24 @@ func main() {
 	}
 
 	viewSQL := fmt.Sprintf(`CREATE OR REPLACE VIEW `+"`%s.inventory.collection`"+` AS
-WITH tx AS (
+WITH tx_all AS (
+  SELECT product_id, transaction_type, transaction_date, unit_price, quantity
+  FROM `+"`%s.inventory.transactions`"+`
+  UNION ALL
+  -- Synthetic "sell" of the sealed product at break time (closes sealed position at market value).
+  SELECT sealed_product_id AS product_id, 'sell' AS transaction_type, break_date AS transaction_date,
+         sealed_market_value AS unit_price, 1 AS quantity
+  FROM `+"`%s.inventory.box_breaks`"+`
+  UNION ALL
+  -- Synthetic "buy" of each pulled single at its allocated cost basis (opens single position).
+  -- Bulk pulls are intentionally excluded: they have no catalog product to attribute to.
+  SELECT p.product_id, 'buy' AS transaction_type, b.break_date AS transaction_date,
+         p.allocated_cost_basis_per_unit AS unit_price, p.quantity
+  FROM `+"`%s.inventory.box_break_pulls`"+` p
+  JOIN `+"`%s.inventory.box_breaks`"+` b USING (break_id)
+  WHERE p.pull_type = 'single' AND p.product_id IS NOT NULL AND p.product_id != ''
+),
+tx AS (
   SELECT
     product_id,
     SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE 0 END)          AS total_buy_qty,
@@ -126,7 +209,7 @@ WITH tx AS (
     SUM(CASE WHEN transaction_type = 'sell' THEN unit_price * quantity ELSE 0 END) AS total_sell_value,
     SUM(CASE WHEN transaction_type = 'buy' THEN quantity ELSE -quantity END)  AS quantity,
     MIN(CASE WHEN transaction_type = 'buy' THEN transaction_date END)         AS first_buy_date
-  FROM `+"`%s.inventory.transactions`"+`
+  FROM tx_all
   GROUP BY product_id
 ),
 latest_price AS (
@@ -168,7 +251,7 @@ SELECT
       POWER(1 + SAFE_DIVIDE(realized_gain + unrealized_gain, total_invested), 365.0 / days_held) - 1
     ELSE NULL
   END                                                                                AS annualized_roi
-FROM base`, project, project, project, project)
+FROM base`, project, project, project, project, project, project, project)
 
 	q := client.Query(viewSQL)
 	job, err := q.Run(ctx)

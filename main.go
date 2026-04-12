@@ -148,6 +148,14 @@ func main() {
 	router.DELETE("/displays/:id", requireAuth, dh.Delete)
 	router.PUT("/displays/:id/items", requireAuth, dh.UpsertItems)
 
+	bbh := handlers.NewBoxBreakHandler(bqClient, inventoryDataset, syncer.Trigger)
+	router.GET("/box-breaks", bbh.List)
+	router.GET("/box-breaks/:id", bbh.Get)
+	router.POST("/box-breaks", requireAuth, bbh.Create)
+	router.PUT("/box-breaks/:id", requireAuth, bbh.Update)
+	router.PUT("/box-breaks/:id/pulls", requireAuth, bbh.ReplacePulls)
+	router.DELETE("/box-breaks/:id", requireAuth, bbh.Delete)
+
 	prh := handlers.NewPriceHistoryHandler(bqClient, marketDataset, nil)
 	router.GET("/price-history", prh.List)
 	router.POST("/price-history", requireAuth, prh.Create)
